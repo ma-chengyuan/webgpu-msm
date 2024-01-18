@@ -3,19 +3,30 @@ import { gpuU32Inputs } from "../utils";
 export const entry = async (
   inputData: gpuU32Inputs[],
   shaderCode: string,
-  u32SizePerOutput: number
+  u32SizePerOutput: number,
+  device: GPUDevice
 ) => {
-  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-  const device = (await getDevice())!;
+  // const time = console.time;
+  // const timeEnd = console.timeEnd;
+
+  // eslint-disable-next-line @typescript-eslint/no-empty-function, @typescript-eslint/no-unused-vars
+  const time = (_: string) => {};
+  // eslint-disable-next-line @typescript-eslint/no-empty-function, @typescript-eslint/no-unused-vars
+  const timeEnd = (_: string) => {};
+
+  time("GPU Prepare");
   const allBuffers: GPUBuffer[] = [];
 
   const numInputs =
     inputData[0].u32Inputs.length / inputData[0].individualInputSize;
 
+  time("GPU Compile");
   const module = device.createShaderModule({
     code: shaderCode,
   });
+  timeEnd("GPU Compile");
 
+  time("GPU Buffer Creation");
   const gpuBufferInputs = inputData.map((data) =>
     createU32ArrayInputBuffer(device, data.u32Inputs)
   );
@@ -27,7 +38,9 @@ export const entry = async (
     size: resultBufferSize,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
   });
+  timeEnd("GPU Buffer Creation");
 
+  time("GPU Create Layouts");
   // Bind group layout and bind group
   const bindGroupLayout = createBindGroupLayout(device, gpuBufferInputs);
   const bindGroup = createBindGroup(
@@ -49,7 +62,9 @@ export const entry = async (
       entryPoint: "main",
     },
   });
+  timeEnd("GPU Create Layouts");
 
+  time("GPU Encode Commands");
   // Commands submission
   const commandEncoder = device.createCommandEncoder();
 
@@ -81,10 +96,20 @@ export const entry = async (
 
   // Submit GPU commands.
   const gpuCommands = commandEncoder.finish();
-  device.queue.submit([gpuCommands]);
+  timeEnd("GPU Encode Commands");
 
+  time("GPU Submit");
+  device.queue.submit([gpuCommands]);
+  timeEnd("GPU Submit");
+
+  timeEnd("GPU Prepare");
+
+  time("GPU Compute");
   // Read buffer.
   await gpuReadBuffer.mapAsync(GPUMapMode.READ);
+  timeEnd("GPU Compute");
+
+  time("GPU Cleanup");
   const arrayBuffer = gpuReadBuffer.getMappedRange();
   const result = new Uint32Array(arrayBuffer.slice(0));
   gpuReadBuffer.unmap();
@@ -93,12 +118,12 @@ export const entry = async (
   for (const buffer of allBuffers) {
     buffer.destroy();
   }
-  device.destroy();
+  timeEnd("GPU Cleanup");
 
   return result;
 };
 
-const getDevice = async () => {
+export const getDevice = async () => {
   if (!("gpu" in navigator)) {
     console.log(
       "WebGPU is not supported. Enable chrome://flags/#enable-unsafe-webgpu flag."

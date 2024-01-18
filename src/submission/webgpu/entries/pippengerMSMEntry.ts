@@ -1,8 +1,9 @@
 import CurveWGSL from "../wgsl/Curve.wgsl";
 import FieldModulusWGSL from "../wgsl/FieldModulus.wgsl";
 import U256WGSL from "../wgsl/U256.wgsl";
+import EntryWGSL from "../wgsl/Entry.wgsl";
 
-import { entry } from "./entryCreator";
+import { entry, getDevice } from "./entryCreator";
 import { ExtPointType } from "@noble/curves/abstract/edwards";
 import { FieldMath } from "../../utils/FieldMath";
 import { bigIntsToU32Array, gpuU32Inputs, u32ArrayToBigInts } from "../utils";
@@ -59,6 +60,7 @@ export const pippinger_msm = async (
 ) => {
   const C = 16;
 
+  console.time("Preprocessing");
   ///
   /// DICTIONARY SETUP
   ///
@@ -111,8 +113,13 @@ export const pippinger_msm = async (
   // the concatenated inputs into reasonable sizes. The ratio of points
   // to scalars is 4:1 since we expanded the point object into its
   // x, y, t, z coordinates.
-  const chunkedPoints = chunkArray(pointsConcatenated, 44_000);
-  const chunkedScalars = chunkArray(scalarsConcatenated, 11_000);
+  const chunkSize = 11_000;
+  const chunkedPoints = chunkArray(pointsConcatenated, 4 * chunkSize);
+  const chunkedScalars = chunkArray(scalarsConcatenated, chunkSize);
+  console.timeEnd("Preprocessing");
+
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  const device = (await getDevice())!;
 
   const gpuResultsAsBigInts = [];
   for (let i = 0; i < chunkedPoints.length; i++) {
@@ -124,13 +131,16 @@ export const pippinger_msm = async (
       {
         u32Inputs: Uint32Array.from(chunkedScalars[i]),
         individualInputSize: FIELD_SIZE,
-      }
+      },
+      device
     );
 
     gpuResultsAsBigInts.push(
       ...u32ArrayToBigInts(bufferResult || new Uint32Array(0))
     );
   }
+
+  device.destroy();
 
   ///
   /// CONVERT GPU RESULTS BACK TO EXTENDED POINTS
@@ -180,36 +190,19 @@ export const pippinger_msm = async (
   return { x: affineResult.x, y: affineResult.y };
 };
 
-const point_mul = async (input1: gpuU32Inputs, input2: gpuU32Inputs) => {
-  const shaderEntry = `
-      @group(0) @binding(0)
-      var<storage, read> input1: array<Point>;
-      @group(0) @binding(1)
-      var<storage, read> input2: array<u32>;
-      @group(0) @binding(2)
-      var<storage, read_write> output: array<Point>;
-  
-      @compute @workgroup_size(64)
-      fn main(
-        @builtin(global_invocation_id)
-        global_id : vec3<u32>
-      ) {
-        var extended_point = input1[global_id.x];
-        var scalar = input2[global_id.x];
-  
-        var result = mul_point_32_bit_scalar(extended_point, scalar);
-  
-        output[global_id.x] = result;
-      }
-      `;
-
+const point_mul = async (
+  input1: gpuU32Inputs,
+  input2: gpuU32Inputs,
+  device: GPUDevice
+) => {
   const shaderCode = prune([U256WGSL, FieldModulusWGSL, CurveWGSL].join(""), [
     "mul_point_32_bit_scalar",
   ]);
 
   return await entry(
     [input1, input2],
-    shaderCode + shaderEntry,
-    EXT_POINT_SIZE
+    shaderCode + EntryWGSL,
+    EXT_POINT_SIZE,
+    device
   );
 };
