@@ -21,7 +21,7 @@ struct MulPointIntermediate {
     scalar: Field
 }
 
-const ZERO_POINT = Point(U256_ZERO, U256_ONE, U256_ONE, U256_ZERO);
+const ZERO_POINT = Point(U256_ZERO, U256_ONE, U256_ZERO, U256_ONE);
 const ZERO_AFFINE = AffinePoint(U256_ZERO, U256_ONE);
 
 fn mul_by_a(f: Field) -> Field {
@@ -49,6 +49,10 @@ fn add_points(p1: Point, p2: Point) -> Point {
     var added_t = field_multiply(e, h);
     var added_z = field_multiply(f, g);
     return Point(added_x, added_y, added_t, added_z);
+}
+
+fn neg_point(p: Point) -> Point {
+    return Point(mul_by_a(p.x), p.y, p.t, mul_by_a(p.z));
 }
 
 fn double_point(p: Point) -> Point {
@@ -153,6 +157,26 @@ fn mul_point_test(p: Point, scalar: Field) -> Point {
 fn mul_point_32_bit_scalar(p: Point, scalar: u32) -> Point {
     var result: Point = Point(U256_ZERO, U256_ONE, U256_ZERO, U256_ONE);
     var temp = p;
+
+    // var xh = scalar >> 1u;
+    // var x3 = scalar + xh;
+    // var c = xh ^ x3;
+    // var scalar_np = x3 & c;
+    // var scalar_nm = xh & c;
+
+    // while !(scalar_np == 0u) || !(scalar_nm == 0u) {
+    //     if (scalar_np & 1u) == 1u { 
+    //         result = add_points(result, temp); 
+    //     }
+    //     if (scalar_nm & 1u) == 1u { 
+    //         result = add_points(result, neg_point(temp)); 
+    //     }
+
+    //     temp = double_point(temp);
+    //     scalar_np = scalar_np >> 1u;
+    //     scalar_nm = scalar_nm >> 1u;
+    // }
+
     var scalar_iter = scalar;
     while !(scalar_iter == 0u) {
         if (scalar_iter & 1u) == 1u {

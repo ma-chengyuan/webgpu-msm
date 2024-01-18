@@ -1,7 +1,8 @@
 import CurveWGSL from "../wgsl/Curve.wgsl";
 import FieldModulusWGSL from "../wgsl/FieldModulus.wgsl";
 import U256WGSL from "../wgsl/U256.wgsl";
-import EntryWGSL from "../wgsl/Entry.wgsl";
+import EntryScalarMulWGSL from "../wgsl/EntryScalarMul.wgsl";
+import EntrySumWGSL from "../wgsl/EntrySum.wgsl";
 
 import { entry, getDevice } from "./entryCreator";
 import { ExtPointType } from "@noble/curves/abstract/edwards";
@@ -121,7 +122,11 @@ export const pippinger_msm = async (
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   const device = (await getDevice())!;
 
-  const gpuResultsAsBigInts = [];
+  console.time("GPU Point Mul");
+  // const gpuResultsAsBigInts = [];
+  const allResultsRaw = new Uint32Array(pointsConcatenated.length * 8);
+  let offset = 0;
+
   for (let i = 0; i < chunkedPoints.length; i++) {
     const bufferResult = await point_mul(
       {
@@ -135,25 +140,11 @@ export const pippinger_msm = async (
       device
     );
 
-    gpuResultsAsBigInts.push(
-      ...u32ArrayToBigInts(bufferResult || new Uint32Array(0))
-    );
+    console.assert(bufferResult.length === chunkedPoints[i].length * 8);
+    allResultsRaw.set(bufferResult || new Uint32Array(0), offset * 8);
+    offset += chunkedPoints[i].length;
   }
-
-  device.destroy();
-
-  ///
-  /// CONVERT GPU RESULTS BACK TO EXTENDED POINTS
-  ///
-  const gpuResultsAsExtendedPoints: ExtPointType[] = [];
-  for (let i = 0; i < gpuResultsAsBigInts.length; i += 4) {
-    const x = gpuResultsAsBigInts[i];
-    const y = gpuResultsAsBigInts[i + 1];
-    const t = gpuResultsAsBigInts[i + 2];
-    const z = gpuResultsAsBigInts[i + 3];
-    const extendedPoint = fieldMath.createPoint(x, y, t, z);
-    gpuResultsAsExtendedPoints.push(extendedPoint);
-  }
+  console.timeEnd("GPU Point Mul");
 
   ///
   /// SUMMATION OF SCALAR MULTIPLICATIONS FOR EACH MSM
@@ -162,12 +153,15 @@ export const pippinger_msm = async (
   const bucketing = msms.map((msm) => msm.size);
   let prevBucketSum = 0;
   for (const bucket of bucketing) {
-    let currentSum = fieldMath.customEdwards.ExtendedPoint.ZERO;
-    for (let i = 0; i < bucket; i++) {
-      currentSum = currentSum.add(
-        gpuResultsAsExtendedPoints[i + prevBucketSum]
-      );
-    }
+    // console.time("Sum clever");
+    const currentSum = await point_sum_wgpu(
+      allResultsRaw.slice(
+        prevBucketSum * EXT_POINT_SIZE,
+        (prevBucketSum + bucket) * EXT_POINT_SIZE
+      ),
+      device,
+      fieldMath
+    );
     msmResults.push(currentSum);
     prevBucketSum += bucket;
   }
@@ -183,6 +177,7 @@ export const pippinger_msm = async (
     originalMsmResult = originalMsmResult.add(msmResults[i]);
   }
 
+  device.destroy();
   ///
   /// CONVERT TO AFFINE POINT FOR FINAL RESULT
   ///
@@ -201,8 +196,86 @@ const point_mul = async (
 
   return await entry(
     [input1, input2],
-    shaderCode + EntryWGSL,
+    shaderCode + EntryScalarMulWGSL,
     EXT_POINT_SIZE,
     device
   );
+};
+
+const point_sum_impl = async (input1: gpuU32Inputs, device: GPUDevice) => {
+  const shaderCode = prune([U256WGSL, FieldModulusWGSL, CurveWGSL].join(""), [
+    "add_points",
+  ]);
+
+  return await entry(
+    [input1],
+    shaderCode + EntrySumWGSL,
+    EXT_POINT_SIZE,
+    device
+  );
+};
+
+const point_sum_cpu = (input: Uint32Array, fieldMath: FieldMath) => {
+  const resultBigInts = u32ArrayToBigInts(input);
+  let sum = fieldMath.createPoint(
+    resultBigInts[0],
+    resultBigInts[1],
+    resultBigInts[2],
+    resultBigInts[3]
+  );
+  const nPoints = input.length / EXT_POINT_SIZE;
+  for (let i = 1; i < nPoints; i++) {
+    const point = fieldMath.createPoint(
+      resultBigInts[i * 4],
+      resultBigInts[i * 4 + 1],
+      resultBigInts[i * 4 + 2],
+      resultBigInts[i * 4 + 3]
+    );
+    sum = sum.add(point);
+  }
+  return sum;
+};
+
+const point_sum_wgpu = async (
+  input1: Uint32Array,
+  device: GPUDevice,
+  fieldMath: FieldMath
+): Promise<ExtPointType> => {
+  const BASECASE_SIZE = 1024;
+  if (input1.length <= BASECASE_SIZE * EXT_POINT_SIZE) {
+    return point_sum_cpu(input1, fieldMath);
+  }
+
+  let input = input1;
+  const WORKGROUP_SIZE = 64;
+  const BATCH_SIZE = EXT_POINT_SIZE * WORKGROUP_SIZE;
+  if (input1.length % BATCH_SIZE !== 0) {
+    input = new Uint32Array(
+      input1.length + BATCH_SIZE - (input1.length % BATCH_SIZE)
+    );
+    input.set(input1);
+    for (let i = input1.length; i < input.length; i += EXT_POINT_SIZE) {
+      // Pad with identity points
+      input.set([0, 0, 0, 0, 0, 0, 0, 0], i);
+      input.set([0, 0, 0, 0, 0, 0, 0, 1], i + 8);
+      input.set([0, 0, 0, 0, 0, 0, 0, 0], i + 16);
+      input.set([0, 0, 0, 0, 0, 0, 0, 1], i + 24);
+    }
+  }
+  const nResultPoints = input.length / BATCH_SIZE;
+  const resultRaw = await point_sum_impl(
+    {
+      u32Inputs: input,
+      individualInputSize: EXT_POINT_SIZE,
+    },
+    device
+  );
+  const resultBuf = new Uint32Array(nResultPoints * EXT_POINT_SIZE);
+  for (let i = 0; i < nResultPoints; i++) {
+    resultBuf.set(
+      resultRaw.slice(i * BATCH_SIZE, i * BATCH_SIZE + EXT_POINT_SIZE),
+      i * EXT_POINT_SIZE
+    );
+  }
+  return await point_sum_wgpu(resultBuf, device, fieldMath);
 };

@@ -66,13 +66,11 @@ fn field_multiply(a: Field, b: Field) -> Field {
     var accumulator: Field = U256_ZERO;
     var newA: Field = a;
     var newB: Field = b;
-    var count: u32 = 0u;
 
     while gt(newB, U256_ZERO) {
         if is_odd(newB) { accumulator = field_add(accumulator, newA); }
         newA = field_double(newA);
         newB = u256_rs1(newB);
-        count = count + 1u;
     }
 
     return accumulator;
