@@ -1,4 +1,4 @@
-import { ALEO_FIELD_MODULUS } from "../params/AleoConstants";
+import { ALEO_FIELD_MODULUS } from "../utils/FieldMath";
 
 export interface gpuU32Inputs {
   u32Inputs: Uint32Array;
@@ -6,11 +6,13 @@ export interface gpuU32Inputs {
 }
 
 export const bigIntsToU16Array = (beBigInts: bigint[]): Uint16Array => {
-  const intsAs16s = beBigInts.map(bigInt => bigIntToU16Array(bigInt));
+  const intsAs16s = beBigInts.map((bigInt) => bigIntToU16Array(bigInt));
   const u16Array = new Uint16Array(beBigInts.length * 16);
-  intsAs16s.forEach((intAs16, index) => {u16Array.set(intAs16, index * 16)});
+  intsAs16s.forEach((intAs16, index) => {
+    u16Array.set(intAs16, index * 16);
+  });
   return u16Array;
-}
+};
 
 export const bigIntToU16Array = (beBigInt: bigint): Uint16Array => {
   const numBits = 256;
@@ -38,9 +40,11 @@ export const flattenU32s = (u32Arrays: Uint32Array[]): Uint32Array => {
 
 // assume bigints are big endian 256-bit integers
 export const bigIntsToU32Array = (beBigInts: bigint[]): Uint32Array => {
-  const intsAs32s = beBigInts.map(bigInt => bigIntToU32Array(bigInt));
+  const intsAs32s = beBigInts.map((bigInt) => bigIntToU32Array(bigInt));
   const u32Array = new Uint32Array(beBigInts.length * 8);
-  intsAs32s.forEach((intAs32, index) => {u32Array.set(intAs32, index * 8)});
+  intsAs32s.forEach((intAs32, index) => {
+    u32Array.set(intAs32, index * 8);
+  });
   return u32Array;
 };
 
@@ -70,7 +74,7 @@ export const u32ArrayToBigInts = (u32Array: Uint32Array): bigint[] => {
     for (let j = 0; j < chunkSize; j++) {
       if (i + j >= u32Array.length) break; // Avoid out-of-bounds access
       const u32 = BigInt(u32Array[i + j]);
-      bigInt |= (u32 << (BigInt(chunkSize - 1 - j) * BigInt(bitsPerElement)));
+      bigInt |= u32 << (BigInt(chunkSize - 1 - j) * BigInt(bitsPerElement));
     }
     bigInts.push(bigInt);
   }
@@ -88,16 +92,16 @@ export const generateRandomFields = (inputSize: number): bigint[] => {
 };
 
 export const convertBigIntsToWasmFields = (bigInts: bigint[]): string[] => {
-  return bigInts.map(bigInt => bigInt.toString() + 'field');
+  return bigInts.map((bigInt) => bigInt.toString() + "field");
 };
 
 const createRandomAleoFieldInt = () => {
-  let bigIntString = '';
+  let bigIntString = "";
   for (let i = 0; i < 8; i++) {
-    bigIntString += Math.floor(Math.random() * (2**32 - 1));
+    bigIntString += Math.floor(Math.random() * (2 ** 32 - 1));
   }
   return BigInt(bigIntString) % ALEO_FIELD_MODULUS;
-}
+};
 
 export const stripFieldSuffix = (field: string): string => {
   return field.slice(0, field.length - 5);
@@ -107,29 +111,39 @@ export const stripGroupSuffix = (group: string): string => {
   return group.slice(0, group.length - 5);
 };
 
-export const chunkArray = (inputsArray: gpuU32Inputs[], batchSize: number): gpuU32Inputs[][] => {
+export const chunkArray = (
+  inputsArray: gpuU32Inputs[],
+  batchSize: number
+): gpuU32Inputs[][] => {
   let index = 0;
   const chunkedArray: gpuU32Inputs[][] = [];
-  const firstInputLength = inputsArray[0].u32Inputs.length / inputsArray[0].individualInputSize;
+  const firstInputLength =
+    inputsArray[0].u32Inputs.length / inputsArray[0].individualInputSize;
 
   while (index < firstInputLength) {
-      const newIndex = index + batchSize;
-      const tempArray: gpuU32Inputs[] = [];
-      inputsArray.forEach(bufferData => {
-        const chunkedGpuU32Inputs = bufferData.u32Inputs.slice(index * bufferData.individualInputSize, newIndex * bufferData.individualInputSize);
-        tempArray.push({
-          u32Inputs: chunkedGpuU32Inputs,
-          individualInputSize: bufferData.individualInputSize
-        });
+    const newIndex = index + batchSize;
+    const tempArray: gpuU32Inputs[] = [];
+    inputsArray.forEach((bufferData) => {
+      const chunkedGpuU32Inputs = bufferData.u32Inputs.slice(
+        index * bufferData.individualInputSize,
+        newIndex * bufferData.individualInputSize
+      );
+      tempArray.push({
+        u32Inputs: chunkedGpuU32Inputs,
+        individualInputSize: bufferData.individualInputSize,
       });
-      index = newIndex;
-      chunkedArray.push(tempArray);
+    });
+    index = newIndex;
+    chunkedArray.push(tempArray);
   }
 
   return chunkedArray;
 };
 
-export function concatUint32Arrays(array1: Uint32Array, array2: Uint32Array): Uint32Array {
+export function concatUint32Arrays(
+  array1: Uint32Array,
+  array2: Uint32Array
+): Uint32Array {
   // Create a new Uint32Array with a length equal to the sum of the lengths of array1 and array2
   const result = new Uint32Array(array1.length + array2.length);
 
