@@ -29,9 +29,17 @@ fn field_reduce(a: u256) -> Field {
     return reduction;
 }
 
+fn field_reduce_single(a: u256) -> Field {
+    var reduction: Field = a;
+    if gte(a, ALEO_FIELD_ORDER) {
+        reduction = u256_sub(reduction, ALEO_FIELD_ORDER);
+    }
+    return reduction;
+}
+
 fn field_add(a: Field, b: Field) -> Field {
     var sum = u256_add(a, b);
-    var result = field_reduce(sum);
+    var result = field_reduce_single(sum);
     return result;
 }
 
@@ -49,32 +57,20 @@ fn field_sub(a: Field, b: Field) -> Field {
 
 fn field_double(a: Field) -> Field {
     var double = u256_double(a);
-    var result = field_reduce(double);
+    var result = field_reduce_single(double);
     return result;
 }
 
 fn field_multiply(a: Field, b: Field) -> Field {
     // return a;
-    var accumulator: Field = Field(
-        array<u32, 8>(0, 0, 0, 0, 0, 0, 0, 0)
-    );
+    var accumulator: Field = U256_ZERO;
     var newA: Field = a;
     var newB: Field = b;
     var count: u32 = 0u;
 
     while gt(newB, U256_ZERO) {
-        if (newB.components[7] & 1u) == 1u {
-            accumulator = u256_add(accumulator, newA);
-
-            var accumulator_gte_ALEO = gte(accumulator, ALEO_FIELD_ORDER);
-
-            if accumulator_gte_ALEO {
-                accumulator = u256_sub(accumulator, ALEO_FIELD_ORDER);
-            }
-        }
-
-        newA = u256_double(newA);
-        newA = field_reduce(newA);
+        if is_odd(newB) { accumulator = field_add(accumulator, newA); }
+        newA = field_double(newA);
         newB = u256_rs1(newB);
         count = count + 1u;
     }
@@ -93,14 +89,9 @@ fn field_pow(base: Field, exponent: Field) -> Field {
 
     var exp = exponent;
     var bse = base;
-    var result: u256 = u256(
-        array<u32, 8>(0, 0, 0, 0, 0, 0, 0, 1)
-    );
+    var result: u256 = U256_ONE;
     while gt(exp, U256_ZERO) {
-        if is_odd(exp) {
-            result = field_multiply(result, bse);
-        }
-
+        if is_odd(exp) { result = field_multiply(result, bse); }
         exp = u256_rs1(exp);
         bse = field_multiply(bse, bse);
     }
