@@ -14,7 +14,7 @@
 
 Ensure you have:
 
-- [Git LFS](https://docs.github.com/en/repositories/working-with-files/managing-large-files/installing-git-large-file-storage)  installed
+- [Git LFS](https://docs.github.com/en/repositories/working-with-files/managing-large-files/installing-git-large-file-storage) installed
 - [Node.js](https://nodejs.org) 16 or later installed
 - [Yarn](https://yarnpkg.com) v1 or v2 installed
 
@@ -39,6 +39,7 @@ Run a local server on localhost:4040.
 ```bash
 yarn start
 ```
+
 Note -- running webgpu functions will only work on [browsers compatible](https://caniuse.com/webgpu) with webgpu.
 
 ## Prize Description
@@ -54,12 +55,12 @@ Achieve the fastest MSM run in a browser over a range of input vector lengths an
 ### Constraints
 
 The implementation must provide the following interface in JavaScript: `compute_msm = async (baseAffinePoints: BigIntPoint[] | U32ArrayPoint[], scalars: bigint[] | Uint32Array[]): Promise<{x: bigint, y: bigint}>`
-    
+
 1.  The function name is `compute_msm`
-    
 2.  There are two input vectors: baseAffinePoints for a vector of elliptic curve affine points and scalars for a vector of finite field elements. There are two options for how the inputs are ingested, using `bigint`s or `Uint32Array`s:
 
     a.
+
     ```
     BigIntPoint: {
       x: bigint,
@@ -69,7 +70,9 @@ The implementation must provide the following interface in JavaScript: `compute_
     }
     scalar: bigint
     ```
+
     b.
+
     ```
     U32ArrayPoint: {
       x: Uint32Array,
@@ -81,14 +84,12 @@ The implementation must provide the following interface in JavaScript: `compute_
     ```
 
     Note -- the inputs are affine points, so the `z` property will be `1n` or `[0, 0, 0, 0, 0, 0, 0, 1]`. The `t` property is the field multiplication of `x` by `y`.
-    
+
 3.  The output is a single elliptic curve affine point: `{ x: bigint, y: bigint }`.
-    
--   The submission should produce correct outputs on input vectors with length up to 2^20. The evaluation will be using input randomly sampled from size 2^16 ~ 2^20.
-    
--   The submissions will be evaluated in a browser context on a variety of consumer-grade hardware.
-    
--   All submissions must include documentation (in English) sufficient to understand the approach being taken.
+
+- The submission should produce correct outputs on input vectors with length up to 2^20. The evaluation will be using input randomly sampled from size 2^16 ~ 2^20.
+- The submissions will be evaluated in a browser context on a variety of consumer-grade hardware.
+- All submissions must include documentation (in English) sufficient to understand the approach being taken.
 
 ## Judging
 
@@ -115,10 +116,11 @@ The baseline will be the Demox Labs WebGPU MSM implementation over BLS12-377 G1.
 Prizes will be given out in good faith and in the sole discretion of the prize committee.
 
 ### Timeline
-* August 1 - 2023 Registration Opens
-* September 15 - Competition Begins
-* February - Submission Deadline
-* March - Winners Announced
+
+- August 1 - 2023 Registration Opens
+- September 15 - Competition Begins
+- February - Submission Deadline
+- March - Winners Announced
 
 ## Submission Instruction
 
@@ -157,18 +159,20 @@ You can use all of the WASM features that work within chrome v115. Multithreadin
 ## Further Questions
 
 If there are any questions about this prize:
-* Ask in the zprize discord: https://discord.gg/DKqrz6F42D.
-* Consult the zprize website: https://www.zprize.io/
+
+- Ask in the zprize discord: https://discord.gg/DKqrz6F42D.
+- Consult the zprize website: https://www.zprize.io/
 
 ## Trouble Shooting
 
 Common issues:
-* If you are unable to run the webgpu benchmarks, ensure you are using a webgpu-compatible browser.
-* If you are not able to load the test case data, be sure you have installed git LFS. You can either reclone the repo after installing git LFS or run `git lfs fetch && git lfs pull`.
-* If you run into general npm package errors, make sure you have nodejs v16 or later installed.
-* If you are using webgpu functions and getting all 0s as output, you may have hit an out of memory error in the gpu. Reduce your input size or consider breaking your computions into smaller steps.
-* If you are running on a windows machine with multiple graphics cards (ie. integrated chip + dedicated card) you can force Chrome to use one of them via windows settings.
-Go to Settings -> Graphics Settings -> Custom options for apps -> Select / add Chrome -> Options -> Select graphics preference
+
+- If you are unable to run the webgpu benchmarks, ensure you are using a webgpu-compatible browser.
+- If you are not able to load the test case data, be sure you have installed git LFS. You can either reclone the repo after installing git LFS or run `git lfs fetch && git lfs pull`.
+- If you run into general npm package errors, make sure you have nodejs v16 or later installed.
+- If you are using webgpu functions and getting all 0s as output, you may have hit an out of memory error in the gpu. Reduce your input size or consider breaking your computions into smaller steps.
+- If you are running on a windows machine with multiple graphics cards (ie. integrated chip + dedicated card) you can force Chrome to use one of them via windows settings.
+  Go to Settings -> Graphics Settings -> Custom options for apps -> Select / add Chrome -> Options -> Select graphics preference
 
 ## Reference
 

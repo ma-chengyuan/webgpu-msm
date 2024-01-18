@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-var-requires */
 const path = require("path");
 const webpack = require("webpack");
-const webpackServer = require('webpack-dev-server');
+const webpackServer = require("webpack-dev-server");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
 const ForkTsCheckerWebpackPlugin = require("fork-ts-checker-webpack-plugin");
 const ESLintPlugin = require("eslint-webpack-plugin");
@@ -11,7 +11,7 @@ const config = {
   mode: "production",
   entry: "./src/index.tsx",
   experiments: {
-    asyncWebAssembly: true
+    asyncWebAssembly: true,
   },
   output: {
     path: path.resolve(__dirname, "build"),
@@ -34,15 +34,19 @@ const config = {
           },
         },
       },
+      {
+        test: /\.wgsl/,
+        type: "asset/source",
+      },
     ],
   },
   resolve: {
     extensions: [".tsx", ".ts", ".js"],
     fallback: {
-      "crypto": require.resolve("crypto-browserify"),
-      "stream": require.resolve("stream-browserify"),
-      "buffer": require.resolve("buffer/")
-    }
+      crypto: require.resolve("crypto-browserify"),
+      stream: require.resolve("stream-browserify"),
+      buffer: require.resolve("buffer/"),
+    },
   },
   plugins: [
     new HtmlWebpackPlugin({
@@ -61,29 +65,29 @@ const config = {
 const workerConfig = {
   mode: "production",
   cache: {
-    type: 'filesystem',
-    allowCollectingMemory: true
+    type: "filesystem",
+    allowCollectingMemory: true,
   },
   performance: {
-    hints: false
+    hints: false,
   },
   experiments: {
     asyncWebAssembly: true,
     syncWebAssembly: true,
-    topLevelAwait: true
+    topLevelAwait: true,
   },
-  target: 'webworker',
+  target: "webworker",
   entry: {
-    wasmMSM: './src/workers/wasmMSM.ts',
+    wasmMSM: "./src/workers/wasmMSM.ts",
   },
   output: {
     pathinfo: false,
-    publicPath: '/',
+    publicPath: "/",
   },
   resolve: {
-    extensions: ['.ts', '.tsx', '.js', '.wasm'],
+    extensions: [".ts", ".tsx", ".js", ".wasm"],
     alias: {
-      shared: path.resolve(__dirname, 'src', 'shared')
+      shared: path.resolve(__dirname, "src", "shared"),
     },
     fallback: {
       url: false,
@@ -93,18 +97,18 @@ const workerConfig = {
       crypto: require.resolve("crypto-browserify"),
       http: false,
       https: false,
-      buffer: require.resolve('buffer'),
-      stream: require.resolve('stream-browserify'),
-      assert: require.resolve('assert')
-    }
+      buffer: require.resolve("buffer"),
+      stream: require.resolve("stream-browserify"),
+      assert: require.resolve("assert"),
+    },
   },
   plugins: [
     new webpack.ProvidePlugin({
-      Buffer: ['buffer', 'Buffer']
+      Buffer: ["buffer", "Buffer"],
     }),
 
     new webpack.ProvidePlugin({
-      process: 'process/browser'
+      process: "process/browser",
     }),
   ],
   module: {
@@ -112,7 +116,7 @@ const workerConfig = {
       {
         test: /\.m?js$/i,
         exclude: /node_modules/,
-        type: 'javascript/auto'
+        type: "javascript/auto",
       },
       {
         test: /\.(ts|js)x?$/i,
@@ -120,16 +124,12 @@ const workerConfig = {
         use: {
           loader: "babel-loader",
           options: {
-            presets: [
-              "@babel/preset-env",
-              "@babel/preset-typescript",
-            ],
+            presets: ["@babel/preset-env", "@babel/preset-typescript"],
           },
         },
       },
-    ]
-  }
+    ],
+  },
 };
-
 
 module.exports = [config, workerConfig];

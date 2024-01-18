@@ -1,44 +1,53 @@
 import { gpuU32Inputs } from "../utils";
 
-export const entry = async(
+export const entry = async (
   inputData: gpuU32Inputs[],
   shaderCode: string,
   u32SizePerOutput: number
-  ) => {
+) => {
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   const device = (await getDevice())!;
   const allBuffers: GPUBuffer[] = [];
-  
-  const numInputs = inputData[0].u32Inputs.length / inputData[0].individualInputSize;
-  
+
+  const numInputs =
+    inputData[0].u32Inputs.length / inputData[0].individualInputSize;
+
   const module = device.createShaderModule({
-    code: shaderCode
+    code: shaderCode,
   });
 
-  const gpuBufferInputs = inputData.map((data) => createU32ArrayInputBuffer(device, data.u32Inputs));
+  const gpuBufferInputs = inputData.map((data) =>
+    createU32ArrayInputBuffer(device, data.u32Inputs)
+  );
 
   // Result Matrix
-  const resultBufferSize = Uint32Array.BYTES_PER_ELEMENT * numInputs * u32SizePerOutput;
+  const resultBufferSize =
+    Uint32Array.BYTES_PER_ELEMENT * numInputs * u32SizePerOutput;
   const resultBuffer = device.createBuffer({
     size: resultBufferSize,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
   });
 
   // Bind group layout and bind group
   const bindGroupLayout = createBindGroupLayout(device, gpuBufferInputs);
-  const bindGroup = createBindGroup(device, bindGroupLayout, gpuBufferInputs, resultBuffer);
+  const bindGroup = createBindGroup(
+    device,
+    bindGroupLayout,
+    gpuBufferInputs,
+    resultBuffer
+  );
 
   // Pipeline setup
 
   const layout = device.createPipelineLayout({
-    bindGroupLayouts: [bindGroupLayout]
+    bindGroupLayouts: [bindGroupLayout],
   });
   const computePipeline = await device.createComputePipelineAsync({
     layout: layout,
     compute: {
       module: module,
-      entryPoint: "main"
-    }
+      entryPoint: "main",
+    },
   });
 
   // Commands submission
@@ -54,7 +63,7 @@ export const entry = async(
   // Get a GPU buffer for reading in an unmapped state.
   const gpuReadBuffer = device.createBuffer({
     size: resultBufferSize,
-    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
   });
 
   allBuffers.push(...gpuBufferInputs);
@@ -85,9 +94,9 @@ export const entry = async(
     buffer.destroy();
   }
   device.destroy();
-  
+
   return result;
-}
+};
 
 const getDevice = async () => {
   if (!("gpu" in navigator)) {
@@ -97,7 +106,9 @@ const getDevice = async () => {
     return;
   }
 
-  const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+  const adapter = await navigator.gpu.requestAdapter({
+    powerPreference: "high-performance",
+  });
   if (!adapter) {
     console.log("Failed to get GPU adapter.");
     return;
@@ -109,7 +120,7 @@ const createU32ArrayInputBuffer = (device: GPUDevice, uint32s: Uint32Array) => {
   const gpuBufferU32Inputs = device.createBuffer({
     mappedAtCreation: true,
     size: uint32s.byteLength,
-    usage: GPUBufferUsage.STORAGE
+    usage: GPUBufferUsage.STORAGE,
   });
   const arrayBufferInput = gpuBufferU32Inputs.getMappedRange();
   new Uint32Array(arrayBufferInput).set(uint32s);
@@ -117,7 +128,10 @@ const createU32ArrayInputBuffer = (device: GPUDevice, uint32s: Uint32Array) => {
   return gpuBufferU32Inputs;
 };
 
-const createBindGroupLayout = (device: GPUDevice, gpuInputBuffers: GPUBuffer[]) => {
+const createBindGroupLayout = (
+  device: GPUDevice,
+  gpuInputBuffers: GPUBuffer[]
+) => {
   // Bind group layout and bind group
   const layoutEntries: GPUBindGroupLayoutEntry[] = [];
   for (let i = 0; i < gpuInputBuffers.length; i++) {
@@ -125,8 +139,8 @@ const createBindGroupLayout = (device: GPUDevice, gpuInputBuffers: GPUBuffer[]) 
       binding: i,
       visibility: GPUShaderStage.COMPUTE,
       buffer: {
-        type: "read-only-storage"
-      }
+        type: "read-only-storage",
+      },
     });
   }
 
@@ -134,8 +148,8 @@ const createBindGroupLayout = (device: GPUDevice, gpuInputBuffers: GPUBuffer[]) 
     binding: gpuInputBuffers.length,
     visibility: GPUShaderStage.COMPUTE,
     buffer: {
-      type: "storage"
-    }
+      type: "storage",
+    },
   };
 
   layoutEntries.push(resultLayoutEntry);
@@ -145,26 +159,31 @@ const createBindGroupLayout = (device: GPUDevice, gpuInputBuffers: GPUBuffer[]) 
   return device.createBindGroupLayout(layout);
 };
 
-const createBindGroup = (device: GPUDevice, bindGroupLayout: GPUBindGroupLayout, gpuInputBuffers: GPUBuffer[], gpuOutputBuffer: GPUBuffer) => {
+const createBindGroup = (
+  device: GPUDevice,
+  bindGroupLayout: GPUBindGroupLayout,
+  gpuInputBuffers: GPUBuffer[],
+  gpuOutputBuffer: GPUBuffer
+) => {
   const entriesToBind = gpuInputBuffers.map((gpuInputBuffer, i) => {
     return {
       binding: i,
       resource: {
-        buffer: gpuInputBuffer
-      }
+        buffer: gpuInputBuffer,
+      },
     };
   });
 
   entriesToBind.push({
     binding: gpuInputBuffers.length,
     resource: {
-      buffer: gpuOutputBuffer
-    }
+      buffer: gpuOutputBuffer,
+    },
   });
 
   const bindGroup = device.createBindGroup({
     layout: bindGroupLayout,
-    entries: entriesToBind
+    entries: entriesToBind,
   });
 
   return bindGroup;

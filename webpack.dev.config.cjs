@@ -2,7 +2,7 @@
 const path = require("path");
 const webpack = require("webpack");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
-const CopyWebpackPlugin = require('copy-webpack-plugin');
+const CopyWebpackPlugin = require("copy-webpack-plugin");
 const ForkTsCheckerWebpackPlugin = require("fork-ts-checker-webpack-plugin");
 const ESLintPlugin = require("eslint-webpack-plugin");
 
@@ -13,7 +13,7 @@ const config = {
   },
   entry: "./src/index.tsx",
   experiments: {
-    asyncWebAssembly: true
+    asyncWebAssembly: true,
   },
   module: {
     rules: [
@@ -32,20 +32,24 @@ const config = {
         },
       },
       {
+        test: /\.wgsl/,
+        type: "asset/source",
+      },
+      {
         test: /\.css$/i,
         exclude: /node_modules/,
-        use: ['style-loader', 'css-loader', 'postcss-loader'],
+        use: ["style-loader", "css-loader", "postcss-loader"],
       },
     ],
   },
   resolve: {
     extensions: [".tsx", ".ts", ".js"],
     fallback: {
-      "crypto": require.resolve("crypto-browserify"),
-      "stream": require.resolve("stream-browserify"),
-      "buffer": require.resolve("buffer/"),
-      "path": require.resolve("path-browserify")
-    }
+      crypto: require.resolve("crypto-browserify"),
+      stream: require.resolve("stream-browserify"),
+      buffer: require.resolve("buffer/"),
+      path: require.resolve("path-browserify"),
+    },
   },
   plugins: [
     new HtmlWebpackPlugin({
@@ -61,10 +65,10 @@ const config = {
     new CopyWebpackPlugin({
       patterns: [
         {
-          from: path.resolve(__dirname, 'public/test-data'),
-          to: path.resolve(__dirname, 'dist/test-data'),
-        }
-      ]
+          from: path.resolve(__dirname, "public/test-data"),
+          to: path.resolve(__dirname, "dist/test-data"),
+        },
+      ],
     }),
   ],
   devtool: "inline-source-map",
@@ -79,8 +83,8 @@ const config = {
     open: true,
     hot: true,
     client: {
-      overlay: false
-    }
+      overlay: false,
+    },
   },
 };
 
@@ -88,29 +92,29 @@ const workerConfig = {
   mode: "development",
   devtool: "inline-source-map",
   cache: {
-    type: 'filesystem',
-    allowCollectingMemory: true
+    type: "filesystem",
+    allowCollectingMemory: true,
   },
   performance: {
-    hints: false
+    hints: false,
   },
   experiments: {
     asyncWebAssembly: true,
     syncWebAssembly: true,
-    topLevelAwait: true
+    topLevelAwait: true,
   },
-  target: 'webworker',
+  target: "webworker",
   entry: {
-    wasmMSM: './src/workers/wasmMSM.ts',
+    wasmMSM: "./src/workers/wasmMSM.ts",
   },
   output: {
     pathinfo: false,
-    publicPath: '/',
+    publicPath: "/",
   },
   resolve: {
-    extensions: ['.ts', '.tsx', '.js', '.wasm'],
+    extensions: [".ts", ".tsx", ".js", ".wasm"],
     alias: {
-      shared: path.resolve(__dirname, 'src', 'shared')
+      shared: path.resolve(__dirname, "src", "shared"),
     },
     fallback: {
       url: false,
@@ -120,18 +124,18 @@ const workerConfig = {
       crypto: require.resolve("crypto-browserify"),
       http: false,
       https: false,
-      buffer: require.resolve('buffer'),
-      stream: require.resolve('stream-browserify'),
-      assert: require.resolve('assert')
-    }
+      buffer: require.resolve("buffer"),
+      stream: require.resolve("stream-browserify"),
+      assert: require.resolve("assert"),
+    },
   },
   plugins: [
     new webpack.ProvidePlugin({
-      Buffer: ['buffer', 'Buffer']
+      Buffer: ["buffer", "Buffer"],
     }),
 
     new webpack.ProvidePlugin({
-      process: 'process/browser'
+      process: "process/browser",
     }),
   ],
   module: {
@@ -139,7 +143,7 @@ const workerConfig = {
       {
         test: /\.m?js$/i,
         exclude: /node_modules/,
-        type: 'javascript/auto'
+        type: "javascript/auto",
       },
       {
         test: /\.(ts|js)x?$/i,
@@ -147,15 +151,12 @@ const workerConfig = {
         use: {
           loader: "babel-loader",
           options: {
-            presets: [
-              "@babel/preset-env",
-              "@babel/preset-typescript",
-            ],
+            presets: ["@babel/preset-env", "@babel/preset-typescript"],
           },
         },
       },
-    ]
-  }
+    ],
+  },
 };
 
 module.exports = [config, workerConfig];
