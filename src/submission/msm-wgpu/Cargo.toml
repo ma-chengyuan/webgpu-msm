@@ -1,8 +1,8 @@
 [package]
-name = "rust-msm"
+name = "msm-wgpu"
 version = "0.1.0"
 authors = ["Chengyuan Ma <chengyuanma@protonmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -16,6 +16,7 @@ ark-ff = "0.4.2"
 ark-ec = "0.4.2"
 ark-ed-on-bls12-377 = "0.4.0"
 web-sys = { version = "0.3.67", features = ["console"] }
+msm-split = { path = "../msm-split" }
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires

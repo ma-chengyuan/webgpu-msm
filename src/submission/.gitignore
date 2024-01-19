@@ -1,0 +1,6 @@
+/target
+**/*.rs.bk
+**/Cargo.lock
+rust-msm/bin/
+rust-msm/pkg/
+**/wasm-pack.log

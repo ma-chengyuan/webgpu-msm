@@ -7,7 +7,7 @@ import {
   u32ArrayToBigInts,
 } from "./webgpu/utils";
 
-import { compute_msm as rust_compute_msm } from "./rust-msm/pkg/rust_msm";
+import { compute_msm as rust_compute_msm } from "./msm-wgpu/pkg/msm_wgpu";
 
 /* eslint-disable @typescript-eslint/no-unused-vars */
 export const compute_msm1 = async (

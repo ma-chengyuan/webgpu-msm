@@ -1,11 +1,17 @@
+mod split;
 mod utils;
+
+use std::convert::TryInto;
 
 use ark_ec::{CurveGroup, Group};
 use ark_ed_on_bls12_377::{EdwardsProjective, Fq};
 use ark_ff::{BigInt, PrimeField, Zero};
 use wasm_bindgen::prelude::*;
 
+use crate::split::{Split16, SplitterConstants};
 use crate::utils::set_panic_hook;
+
+type Splitter = Split16;
 
 fn read_fq(buf: &[u32]) -> Fq {
     debug_assert_eq!(buf.len(), 8);
@@ -31,11 +37,14 @@ fn write_fq(buf: &mut [u32], fq: &Fq) {
     buf[0] = (bigint.0[3] >> 32) as u32;
 }
 
-#[allow(clippy::all)]
 #[wasm_bindgen]
 pub fn compute_msm(points_flat: &[u32], scalars_flat: &[u32]) -> Vec<u32> {
     set_panic_hook();
 
+    use web_sys::console;
+    console::log_1(&"Computing MSM".into());
+
+    // Sanity check
     // 8 u32s for a coordinate component; 4 components per point
     debug_assert_eq!(points_flat.len() % 32, 0);
     let n_points = points_flat.len() / 32;
@@ -52,25 +61,64 @@ pub fn compute_msm(points_flat: &[u32], scalars_flat: &[u32]) -> Vec<u32> {
         points.push(point);
     }
 
-    let mut scalars = Vec::with_capacity(n_points);
+    console::time_with_label("split");
+    let mut splitted: Vec<Vec<u32>> = (0..Splitter::N_WINDOWS)
+        .map(|_| Vec::with_capacity(n_points))
+        .collect();
     for i in 0..n_points {
-        let scalar = read_fq(&scalars_flat[8 * i..8 * i + 8]);
-        scalars.push(scalar);
+        let slice: &[u32; 8] = unsafe {
+            (&scalars_flat[8 * i..8 * i + 8])
+                .try_into()
+                .unwrap_unchecked()
+        };
+        let splitted_scalars = Splitter::split(slice);
+        for (j, splitted_scalar) in splitted_scalars.iter().enumerate() {
+            splitted[j].push(*splitted_scalar);
+        }
+    }
+    console::time_end_with_label("split");
+
+    const N_BUCKETS: usize = 1 << Splitter::WINDOW_SIZE;
+
+    console::time_with_label("bucket");
+    let mut buckets = vec![vec![Option::<EdwardsProjective>::None; N_BUCKETS]; Splitter::N_WINDOWS];
+    for (i, splitted_scalars) in splitted.iter().enumerate() {
+        for (split_scalar, point) in splitted_scalars.iter().zip(points.iter()) {
+            let bucket = (*split_scalar) as usize;
+            if bucket == 0 {
+                continue;
+            }
+            assert!(bucket < N_BUCKETS);
+            buckets[i][bucket] = Some(match buckets[i][bucket] {
+                None => *point,
+                Some(existing) => existing + point,
+            })
+        }
+    }
+    console::time_end_with_label("bucket");
+    let bucket_sums = buckets.into_iter().map(|bucket| {
+        let mut sum = EdwardsProjective::zero();
+        let mut carry = EdwardsProjective::zero();
+        for i in (1..N_BUCKETS).rev() {
+            if let Some(point) = bucket[i] {
+                carry += point;
+            }
+            sum += carry;
+        }
+        sum
+    });
+    let mut sum = EdwardsProjective::zero();
+    for bucket_sum in bucket_sums {
+        for _ in 0..Splitter::WINDOW_SIZE {
+            sum.double_in_place();
+        }
+        sum += bucket_sum;
     }
 
-    let result = compute_msm_impl(&points, &scalars);
+    let result = sum;
     let result_affine = result.into_affine();
     let mut result_buf = vec![0u32; 16];
     write_fq(&mut result_buf[0..8], &result_affine.x);
     write_fq(&mut result_buf[8..16], &result_affine.y);
     result_buf
-}
-
-#[allow(clippy::all)]
-fn compute_msm_impl(points: &[EdwardsProjective], scalars: &[Fq]) -> EdwardsProjective {
-    let mut acc = EdwardsProjective::zero();
-    for (point, scalar) in points.iter().zip(scalars.iter()) {
-        acc += point.mul_bigint(scalar.into_bigint());
-    }
-    acc
 }
