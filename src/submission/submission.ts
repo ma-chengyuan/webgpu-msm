@@ -7,8 +7,6 @@ import {
   u32ArrayToBigInts,
 } from "./webgpu/utils";
 
-import { compute_msm as rust_compute_msm } from "./msm-wgpu/pkg/msm_wgpu";
-
 /* eslint-disable @typescript-eslint/no-unused-vars */
 export const compute_msm1 = async (
   baseAffinePoints: BigIntPoint[] | U32ArrayPoint[],
@@ -43,7 +41,16 @@ export const compute_msm = async (
     const s = scalars[i];
     scalarBuffer.set(typeof s === "bigint" ? bigIntToU32Array(s) : s, i * 8);
   }
-  const resultBuffer = rust_compute_msm(pointBuffer, scalarBuffer);
-  const result = u32ArrayToBigInts(resultBuffer);
-  return { x: result[0], y: result[1] };
+
+  const worker = new Worker(new URL("worker.js", import.meta.url));
+  worker.postMessage({ points: pointBuffer, scalars: scalarBuffer }, [
+    pointBuffer.buffer,
+    scalarBuffer.buffer,
+  ]);
+  return new Promise((resolve) => {
+    worker.onmessage = (event) => {
+      const result = u32ArrayToBigInts(event.data.result);
+      resolve({ x: result[0], y: result[1] });
+    };
+  });
 };
