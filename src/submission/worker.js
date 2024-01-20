@@ -13,6 +13,6 @@ onmessage = async (event) => {
   /** @type {Uint32Array} */
   const scalars = event.data.scalars;
   /** @type {Uint32Array} */
-  const result = compute_msm(points, scalars);
+  const result = await compute_msm(points, scalars, event.data.options);
   postMessage({ result: result }, [result.buffer]);
 };

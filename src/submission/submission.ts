@@ -20,6 +20,11 @@ export const compute_msm1 = async (
   return await pippinger_msm(pointsAsU32s, scalarsAsU16s, fieldMath);
 };
 
+type MSMOptions = {
+  bucketImpl: "gpu" | "cpu";
+  bucketSumImpl: "gpu" | "cpu";
+};
+
 export const compute_msm = async (
   baseAffinePoints: BigIntPoint[] | U32ArrayPoint[],
   scalars: bigint[] | Uint32Array[]
@@ -43,10 +48,18 @@ export const compute_msm = async (
   }
 
   const worker = new Worker(new URL("worker.js", import.meta.url));
-  worker.postMessage({ points: pointBuffer, scalars: scalarBuffer }, [
-    pointBuffer.buffer,
-    scalarBuffer.buffer,
-  ]);
+  const options: MSMOptions = {
+    bucketImpl: "gpu",
+    bucketSumImpl: "gpu",
+  };
+  worker.postMessage(
+    {
+      points: pointBuffer,
+      scalars: scalarBuffer,
+      options,
+    },
+    [pointBuffer.buffer, scalarBuffer.buffer]
+  );
   return new Promise((resolve) => {
     worker.onmessage = (event) => {
       const result = u32ArrayToBigInts(event.data.result);

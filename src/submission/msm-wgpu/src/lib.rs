@@ -1,67 +1,69 @@
+mod bytes;
+mod gpu;
 mod split;
 mod utils;
 
 use std::convert::TryInto;
 
 use ark_ec::{CurveGroup, Group};
-use ark_ed_on_bls12_377::{EdwardsProjective, Fq};
-use ark_ff::{BigInt, PrimeField, Zero};
+use ark_ed_on_bls12_377::EdwardsProjective;
+use ark_ff::Zero;
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
+use web_sys::console;
+use web_sys::js_sys::Uint32Array;
 
+use crate::bytes::{read_points, write_fq, N_U32S_PER_POINT};
 use crate::split::{Split16, SplitterConstants};
 use crate::utils::set_panic_hook;
 
-type Splitter = Split16;
-
-fn read_fq(buf: &[u32]) -> Fq {
-    debug_assert_eq!(buf.len(), 8);
-    let bigint = BigInt([
-        ((buf[6] as u64) << 32) + buf[7] as u64,
-        ((buf[4] as u64) << 32) + buf[5] as u64,
-        ((buf[2] as u64) << 32) + buf[3] as u64,
-        ((buf[0] as u64) << 32) + buf[1] as u64,
-    ]);
-    Fq::from_bigint(bigint).unwrap()
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum BucketImplementation {
+    Cpu,
+    Gpu,
 }
 
-fn write_fq(buf: &mut [u32], fq: &Fq) {
-    debug_assert_eq!(buf.len(), 8);
-    let bigint = fq.into_bigint();
-    buf[7] = (bigint.0[0] & 0xffffffff) as u32;
-    buf[6] = (bigint.0[0] >> 32) as u32;
-    buf[5] = (bigint.0[1] & 0xffffffff) as u32;
-    buf[4] = (bigint.0[1] >> 32) as u32;
-    buf[3] = (bigint.0[2] & 0xffffffff) as u32;
-    buf[2] = (bigint.0[2] >> 32) as u32;
-    buf[1] = (bigint.0[3] & 0xffffffff) as u32;
-    buf[0] = (bigint.0[3] >> 32) as u32;
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum BucketSumImplementation {
+    Cpu,
+    Gpu,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+
+struct Options {
+    bucket_impl: BucketImplementation,
+    bucket_sum_impl: BucketSumImplementation,
 }
 
 #[wasm_bindgen]
-pub fn compute_msm(points_flat: &[u32], scalars_flat: &[u32]) -> Vec<u32> {
-    set_panic_hook();
+#[allow(clippy::never_loop)]
+pub async fn compute_msm(
+    points_flat: &[u32],
+    scalars_flat: &[u32],
+    options: JsValue,
+) -> Uint32Array {
+    type Splitter = Split16;
 
-    use web_sys::console;
-    console::log_1(&"Computing MSM".into());
+    set_panic_hook();
+    console_log::init_with_level(log::Level::Info).unwrap();
+
+    let options: Options = serde_wasm_bindgen::from_value(options).expect("invalid options");
+
+    const N_BUCKETS: usize = 1 << Splitter::WINDOW_SIZE;
+    let gpu_context = gpu::GpuDeviceQueue::new().await;
 
     // Sanity check
-    // 8 u32s for a coordinate component; 4 components per point
-    debug_assert_eq!(points_flat.len() % 32, 0);
-    let n_points = points_flat.len() / 32;
+    debug_assert_eq!(points_flat.len() % N_U32S_PER_POINT, 0);
+    let n_points = points_flat.len() / N_U32S_PER_POINT;
     debug_assert_eq!(scalars_flat.len() % 8, 0);
     debug_assert_eq!(scalars_flat.len() / 8, n_points);
 
-    let mut points = Vec::with_capacity(n_points);
-    for i in 0..n_points {
-        let x = read_fq(&points_flat[32 * i..32 * i + 8]);
-        let y = read_fq(&points_flat[32 * i + 8..32 * i + 16]);
-        let t = read_fq(&points_flat[32 * i + 16..32 * i + 24]);
-        let z = read_fq(&points_flat[32 * i + 24..32 * i + 32]);
-        let point = EdwardsProjective::new_unchecked(x, y, t, z);
-        points.push(point);
-    }
+    let points = read_points(points_flat);
 
-    console::time_with_label("split");
     let mut splitted: Vec<Vec<u32>> = (0..Splitter::N_WINDOWS)
         .map(|_| Vec::with_capacity(n_points))
         .collect();
@@ -76,37 +78,46 @@ pub fn compute_msm(points_flat: &[u32], scalars_flat: &[u32]) -> Vec<u32> {
             splitted[j].push(*splitted_scalar);
         }
     }
-    console::time_end_with_label("split");
 
-    const N_BUCKETS: usize = 1 << Splitter::WINDOW_SIZE;
-
-    console::time_with_label("bucket");
-    let mut buckets = vec![vec![Option::<EdwardsProjective>::None; N_BUCKETS]; Splitter::N_WINDOWS];
-    for (i, splitted_scalars) in splitted.iter().enumerate() {
-        for (split_scalar, point) in splitted_scalars.iter().zip(points.iter()) {
-            let bucket = (*split_scalar) as usize;
-            if bucket == 0 {
-                continue;
+    let mut buckets = Vec::with_capacity(Splitter::N_WINDOWS);
+    match options.bucket_impl {
+        BucketImplementation::Cpu => {
+            console::time_with_label("bucketing (cpu)");
+            for splitted_scalars in splitted.iter() {
+                let bucket = bucket_cpu(splitted_scalars, &points, N_BUCKETS);
+                buckets.push(bucket);
             }
-            assert!(bucket < N_BUCKETS);
-            buckets[i][bucket] = Some(match buckets[i][bucket] {
-                None => *point,
-                Some(existing) => existing + point,
-            })
+            console::time_end_with_label("bucketing (cpu)");
+        }
+        BucketImplementation::Gpu => {
+            console::time_with_label("bucketing (gpu)");
+            let bucketer = gpu::bucket::GpuBucketer::new(&gpu_context);
+            for splitted_scalars in splitted.iter() {
+                let bucket = bucketer.bucket(splitted_scalars, &points, N_BUCKETS).await;
+                buckets.push(bucket);
+            }
+            console::time_end_with_label("bucketing (gpu)");
         }
     }
-    console::time_end_with_label("bucket");
-    let bucket_sums = buckets.into_iter().map(|bucket| {
-        let mut sum = EdwardsProjective::zero();
-        let mut carry = EdwardsProjective::zero();
-        for i in (1..N_BUCKETS).rev() {
-            if let Some(point) = bucket[i] {
-                carry += point;
-            }
-            sum += carry;
+
+    let mut bucket_sums;
+    match options.bucket_sum_impl {
+        BucketSumImplementation::Cpu => {
+            console::time_with_label("summing (cpu)");
+            bucket_sums = buckets.into_iter().map(bucket_sum_cpu).collect::<Vec<_>>();
+            console::time_end_with_label("summing (cpu)");
         }
-        sum
-    });
+        BucketSumImplementation::Gpu => {
+            console::time_with_label("summing (gpu)");
+            let bucket_summer = gpu::bucket_sum::GpuBucketSummer::new(&gpu_context);
+            bucket_sums = Vec::with_capacity(Splitter::N_WINDOWS);
+            for bucket in buckets.into_iter() {
+                bucket_sums.push(bucket_summer.bucket_sum(&bucket).await);
+            }
+            console::time_end_with_label("summing (gpu)");
+        }
+    }
+
     let mut sum = EdwardsProjective::zero();
     for bucket_sum in bucket_sums {
         for _ in 0..Splitter::WINDOW_SIZE {
@@ -117,8 +128,42 @@ pub fn compute_msm(points_flat: &[u32], scalars_flat: &[u32]) -> Vec<u32> {
 
     let result = sum;
     let result_affine = result.into_affine();
-    let mut result_buf = vec![0u32; 16];
+    let mut result_buf = [0u32; 16];
     write_fq(&mut result_buf[0..8], &result_affine.x);
     write_fq(&mut result_buf[8..16], &result_affine.y);
-    result_buf
+    Uint32Array::from(&result_buf[..])
+}
+
+fn bucket_cpu(
+    scalars: &[u32],
+    points: &[EdwardsProjective],
+    n_buckets: usize,
+) -> Vec<EdwardsProjective> {
+    let mut bucket = vec![EdwardsProjective::zero(); n_buckets];
+    for (scalar, point) in scalars.iter().zip(points.iter()) {
+        let bucket_id = (*scalar) as usize;
+        if bucket_id == 0 {
+            continue;
+        }
+        assert!(bucket_id < n_buckets);
+        let existing = &bucket[bucket_id];
+        bucket[bucket_id] = if existing.is_zero() {
+            *point
+        } else {
+            existing + point
+        };
+    }
+    bucket
+}
+
+fn bucket_sum_cpu(bucket: Vec<EdwardsProjective>) -> EdwardsProjective {
+    let mut sum = EdwardsProjective::zero();
+    let mut carry = EdwardsProjective::zero();
+    for i in (1..bucket.len()).rev() {
+        if !bucket[i].is_zero() {
+            carry += bucket[i];
+        }
+        sum += carry;
+    }
+    sum
 }
