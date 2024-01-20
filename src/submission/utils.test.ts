@@ -1,4 +1,3 @@
-import { ALEO_FIELD_MODULUS } from "../utils/FieldMath";
 import {
   bigIntToU32Array,
   bigIntsToU32Array,
@@ -10,13 +9,6 @@ const testData: [bigint, Uint32Array][] = [
   [BigInt(1), new Uint32Array([0, 0, 0, 0, 0, 0, 0, 1])],
   [BigInt(33), new Uint32Array([0, 0, 0, 0, 0, 0, 0, 33])],
   [BigInt(4294967297), new Uint32Array([0, 0, 0, 0, 0, 0, 1, 1])],
-  [
-    ALEO_FIELD_MODULUS,
-    new Uint32Array([
-      313222494, 2586617174, 1622428958, 1547153409, 1504343806, 3489660929,
-      168919040, 1,
-    ]),
-  ],
   [
     BigInt(
       "115792089237316195423570985008687907853269984665640564039457584007913129639935"

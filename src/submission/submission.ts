@@ -1,24 +1,5 @@
 import { BigIntPoint, U32ArrayPoint } from "../reference/types";
-import { FieldMath } from "./utils/FieldMath";
-import { pippinger_msm } from "./webgpu/entries/pippengerMSMEntry";
-import {
-  bigIntToU32Array,
-  bigIntsToU16Array,
-  u32ArrayToBigInts,
-} from "./webgpu/utils";
-
-/* eslint-disable @typescript-eslint/no-unused-vars */
-export const compute_msm1 = async (
-  baseAffinePoints: BigIntPoint[] | U32ArrayPoint[],
-  scalars: bigint[] | Uint32Array[]
-): Promise<{ x: bigint; y: bigint }> => {
-  const fieldMath = new FieldMath();
-  const pointsAsU32s = (baseAffinePoints as BigIntPoint[]).map((point) =>
-    fieldMath.createPoint(point.x, point.y, point.t, point.z)
-  );
-  const scalarsAsU16s = Array.from(bigIntsToU16Array(scalars as bigint[]));
-  return await pippinger_msm(pointsAsU32s, scalarsAsU16s, fieldMath);
-};
+import { bigIntToU32Array, u32ArrayToBigInts } from "./utils";
 
 type MSMOptions = {
   bucketImpl: "gpu" | "cpu";
@@ -50,7 +31,7 @@ export const compute_msm = async (
   const worker = new Worker(new URL("worker.js", import.meta.url));
   const options: MSMOptions = {
     bucketImpl: "gpu",
-    bucketSumImpl: "gpu",
+    bucketSumImpl: "cpu",
   };
   worker.postMessage(
     {
