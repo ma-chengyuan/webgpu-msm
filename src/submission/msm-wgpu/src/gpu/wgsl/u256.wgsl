@@ -217,8 +217,10 @@ fn u256_subw(a: u256, b: u256) -> u256 {
 
 
 fn equal(a: u256, b: u256) -> bool {
+    var a_components = a.components;
+    var b_components = b.components;
     for (var i = 0u; i < 8u; i++) {
-        if a.components[i] != b.components[i] {
+        if a_components[i] != b_components[i] {
             return false;
         }
     }
@@ -228,12 +230,13 @@ fn equal(a: u256, b: u256) -> bool {
 
 // returns whether a > b
 fn gt(a: u256, b: u256) -> bool {
+    var a_components = a.components;
+    var b_components = b.components;
     for (var i = 0u; i < 8u; i++) {
-        if a.components[i] < b.components[i] {
+        if a_components[i] < b_components[i] {
             return false;
         }
-
-        if a.components[i] > b.components[i] {
+        if a_components[i] > b_components[i] {
             return true;
         }
     }
