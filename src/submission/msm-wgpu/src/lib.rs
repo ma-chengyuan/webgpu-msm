@@ -9,24 +9,22 @@ use ark_ec::{CurveGroup, Group};
 use ark_ed_on_bls12_377::EdwardsProjective;
 use ark_ff::Zero;
 use serde::{Deserialize, Serialize};
-use wasm_bindgen::prelude::*;
-use web_sys::console;
-use web_sys::js_sys::Uint32Array;
 
 use crate::bytes::{read_points, write_fq, N_U32S_PER_POINT};
-use crate::split::{Split16, SplitterConstants};
-use crate::utils::set_panic_hook;
+#[allow(unused_imports)]
+use crate::split::{Split12, Split16, Split20, SplitterConstants};
+use crate::utils::{time_begin, time_end};
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum BucketImplementation {
+pub enum BucketImplementation {
     Cpu,
     Gpu,
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum BucketSumImplementation {
+pub enum BucketSumImplementation {
     Cpu,
     Gpu,
 }
@@ -34,25 +32,27 @@ enum BucketSumImplementation {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 
-struct Options {
-    bucket_impl: BucketImplementation,
-    bucket_sum_impl: BucketSumImplementation,
+pub struct Options {
+    pub bucket_impl: BucketImplementation,
+    pub bucket_sum_impl: BucketSumImplementation,
 }
 
-#[wasm_bindgen]
-#[allow(clippy::never_loop)]
-pub async fn compute_msm(
+#[wasm_bindgen::prelude::wasm_bindgen]
+#[cfg(target = "wasm32-unknown-unknown")]
+pub async fn compute_msm_js(
     points_flat: &[u32],
     scalars_flat: &[u32],
-    options: JsValue,
-) -> Uint32Array {
-    type Splitter = Split16;
-
-    set_panic_hook();
+    options: wasm_bindgen::prelude::JsValue,
+) -> web_sys::js_sys::Uint32Array {
+    crate::utils::set_panic_hook();
     console_log::init_with_level(log::Level::Info).unwrap();
-
     let options: Options = serde_wasm_bindgen::from_value(options).expect("invalid options");
+    let result = compute_msm(points_flat, scalars_flat, options).await;
+    web_sys::js_sys::Uint32Array::from(&result[..])
+}
 
+pub async fn compute_msm(points_flat: &[u32], scalars_flat: &[u32], options: Options) -> [u32; 16] {
+    type Splitter = Split16;
     const N_BUCKETS: usize = 1 << Splitter::WINDOW_SIZE;
     let gpu_context = gpu::GpuDeviceQueue::new().await;
 
@@ -82,39 +82,54 @@ pub async fn compute_msm(
     let mut buckets = Vec::with_capacity(Splitter::N_WINDOWS);
     match options.bucket_impl {
         BucketImplementation::Cpu => {
-            console::time_with_label("bucketing (cpu)");
+            time_begin("bucketing (cpu)");
             for splitted_scalars in splitted.iter() {
                 let bucket = bucket_cpu(splitted_scalars, &points, N_BUCKETS);
                 buckets.push(bucket);
             }
-            console::time_end_with_label("bucketing (cpu)");
+            time_end("bucketing (cpu)");
         }
         BucketImplementation::Gpu => {
-            console::time_with_label("bucketing (gpu)");
+            time_begin("bucketing (gpu)");
             let bucketer = gpu::bucket::GpuBucketer::new(&gpu_context);
             for splitted_scalars in splitted.iter() {
                 let bucket = bucketer.bucket(splitted_scalars, &points, N_BUCKETS).await;
                 buckets.push(bucket);
             }
-            console::time_end_with_label("bucketing (gpu)");
+            // buckets.extend(
+            //     futures::future::join_all(splitted.iter().map(|scalars| {
+            //         let bucketer = gpu::bucket::GpuBucketer::new(&gpu_context);
+            //         let points = &points;
+            //         async move { bucketer.bucket(scalars, points, N_BUCKETS).await }
+            //     }))
+            //     .await,
+            // );
+            time_end("bucketing (gpu)");
         }
     }
 
     let mut bucket_sums;
     match options.bucket_sum_impl {
         BucketSumImplementation::Cpu => {
-            console::time_with_label("summing (cpu)");
+            time_begin("summing (cpu)");
             bucket_sums = buckets.into_iter().map(bucket_sum_cpu).collect::<Vec<_>>();
-            console::time_end_with_label("summing (cpu)");
+            time_end("summing (cpu)");
         }
         BucketSumImplementation::Gpu => {
-            console::time_with_label("summing (gpu)");
-            let bucket_summer = gpu::bucket_sum::GpuBucketSummer::new(&gpu_context);
+            time_begin("summing (gpu)");
             bucket_sums = Vec::with_capacity(Splitter::N_WINDOWS);
-            for bucket in buckets.into_iter() {
-                bucket_sums.push(bucket_summer.bucket_sum(&bucket).await);
-            }
-            console::time_end_with_label("summing (gpu)");
+            // let bucket_summer = gpu::bucket_sum::GpuBucketSummer::new(&gpu_context);
+            // for bucket in buckets.into_iter() {
+            //     bucket_sums.push(bucket_summer.bucket_sum(&bucket).await);
+            // }
+            bucket_sums.extend(
+                futures::future::join_all(buckets.into_iter().map(|bucket| {
+                    let bucket_summer = gpu::bucket_sum::GpuBucketSummer::new(&gpu_context);
+                    async move { bucket_summer.bucket_sum(&bucket).await }
+                }))
+                .await,
+            );
+            time_end("summing (gpu)");
         }
     }
 
@@ -131,7 +146,7 @@ pub async fn compute_msm(
     let mut result_buf = [0u32; 16];
     write_fq(&mut result_buf[0..8], &result_affine.x);
     write_fq(&mut result_buf[8..16], &result_affine.y);
-    Uint32Array::from(&result_buf[..])
+    result_buf
 }
 
 fn bucket_cpu(

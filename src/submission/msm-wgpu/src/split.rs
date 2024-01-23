@@ -11,4 +11,7 @@ pub(crate) trait SplitterConstants {
     type Output;
 }
 
-define_msm_scalar_splitter! { Split16: [u32; 8] -> [16u32]  }
+define_msm_scalar_splitter! { Split8:  [u32; 8] -> [ 8u32] }
+define_msm_scalar_splitter! { Split12: [u32; 8] -> [12u32] }
+define_msm_scalar_splitter! { Split16: [u32; 8] -> [16u32] }
+define_msm_scalar_splitter! { Split20: [u32; 8] -> [20u32] }

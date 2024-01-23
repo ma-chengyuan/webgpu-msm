@@ -45,6 +45,7 @@ impl<'a> GpuBucketer<'a> {
         n_buckets: usize,
     ) -> Vec<EdwardsProjective> {
         const MAX_BATCH_SIZE: usize = 44000;
+        const MAX_IN_FLIGHT: usize = 4;
 
         assert_eq!(scalars.len(), points.len());
 
@@ -89,6 +90,7 @@ impl<'a> GpuBucketer<'a> {
 
         let mut current_bucket = 1;
         let n_batches = (n_nonzero + MAX_BATCH_SIZE - 1) / MAX_BATCH_SIZE;
+        let mut submitted: Vec<wgpu::SubmissionIndex> = vec![];
         for i in 0..n_batches {
             let start = i * MAX_BATCH_SIZE;
             let end = ((i + 1) * MAX_BATCH_SIZE).min(n_nonzero);
@@ -136,7 +138,17 @@ impl<'a> GpuBucketer<'a> {
                 &bind_group,
                 n_workgroups,
             );
-            self.queue.submit(Some(command_encoder.finish()));
+            // Limits the number of in-flight batches. This prevents TDRs for
+            // large instances when run directly (not through WebGPU). Not a
+            // concern for WebGPU because device is automatically polled.
+            if submitted.len() >= MAX_IN_FLIGHT {
+                let wait_idx = &submitted[submitted.len() - MAX_IN_FLIGHT];
+                self.device
+                    .poll(wgpu::Maintain::wait_for(wait_idx.clone()))
+                    .panic_on_timeout();
+            }
+            let submission_idx = self.queue.submit(Some(command_encoder.finish()));
+            submitted.push(submission_idx);
             // log::info!("batch {} dispatched", i);
         }
 
