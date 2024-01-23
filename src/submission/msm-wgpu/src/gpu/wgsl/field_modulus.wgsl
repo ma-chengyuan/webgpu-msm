@@ -67,12 +67,14 @@ fn field_multiply(a: Field, b: Field) -> Field {
     // return a;
     var accumulator: Field = U256_ZERO;
     var newA: Field = a;
-    var newB: Field = b;
 
-    while gt(newB, U256_ZERO) {
-        if is_odd(newB) { accumulator = field_add(accumulator, newA); }
-        newA = field_double(newA);
-        newB = u256_rs1(newB);
+    for (var i = 7i; i >= 0i; i--) {
+        var temp = b.components[i];
+        for (var j = 0u; j < 32u; j++) {
+            if (temp & 1u) == 1u { accumulator = field_add(accumulator, newA); }
+            newA = field_double(newA);
+            temp >>= 1;
+        }
     }
 
     return accumulator;
