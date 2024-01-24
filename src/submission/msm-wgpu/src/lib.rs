@@ -91,19 +91,19 @@ pub async fn compute_msm(points_flat: &[u32], scalars_flat: &[u32], options: Opt
         }
         BucketImplementation::Gpu => {
             time_begin("bucketing (gpu)");
-            let bucketer = gpu::bucket::GpuBucketer::new(&gpu_context);
-            for splitted_scalars in splitted.iter() {
-                let bucket = bucketer.bucket(splitted_scalars, &points, N_BUCKETS).await;
-                buckets.push(bucket);
-            }
-            // buckets.extend(
-            //     futures::future::join_all(splitted.iter().map(|scalars| {
-            //         let bucketer = gpu::bucket::GpuBucketer::new(&gpu_context);
-            //         let points = &points;
-            //         async move { bucketer.bucket(scalars, points, N_BUCKETS).await }
-            //     }))
-            //     .await,
-            // );
+            // let bucketer = gpu::bucket::GpuBucketer::new(&gpu_context);
+            // for splitted_scalars in splitted.iter() {
+            //     let bucket = bucketer.bucket(splitted_scalars, &points, N_BUCKETS).await;
+            //     buckets.push(bucket);
+            // }
+            buckets.extend(
+                futures::future::join_all(splitted.iter().map(|scalars| {
+                    let bucketer = gpu::bucket::GpuBucketer::new(&gpu_context);
+                    let points = &points;
+                    async move { bucketer.bucket(scalars, points, N_BUCKETS).await }
+                }))
+                .await,
+            );
             time_end("bucketing (gpu)");
         }
     }
