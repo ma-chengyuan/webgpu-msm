@@ -36,6 +36,46 @@ impl GpuDeviceQueue {
             .expect("failed to create device");
         Self { device, queue }
     }
+
+    pub async fn probe_max_vram(&self) -> u64 {
+        let max_buffer_size = self.device.limits().max_storage_buffer_binding_size;
+        log::info!("max_buffer_size: {}", max_buffer_size);
+        let mut buffers = vec![];
+        let mut successful_allocation = true;
+        while successful_allocation {
+            let mut allocation_size = max_buffer_size;
+            successful_allocation = false;
+            while allocation_size >= 64 * 1024 * 1024 {
+                self.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+                let new_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: None,
+                    size: allocation_size as u64,
+                    usage: wgpu::BufferUsages::STORAGE,
+                    mapped_at_creation: false,
+                });
+                log::info!("allocation_size: {}", allocation_size);
+                match self.device.pop_error_scope().await {
+                    None => {
+                        successful_allocation = true;
+                        buffers.push(new_buffer);
+                        break;
+                    }
+                    Some(_) => {
+                        allocation_size /= 2;
+                        log::info!("out of memory: {}", allocation_size);
+                    }
+                }
+            }
+        }
+        buffers
+            .into_iter()
+            .map(|buffer| {
+                let size = buffer.size();
+                buffer.destroy();
+                size
+            })
+            .sum()
+    }
 }
 
 enum BufferBinding {

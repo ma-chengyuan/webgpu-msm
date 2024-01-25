@@ -3,6 +3,46 @@ export interface gpuU32Inputs {
   individualInputSize: number;
 }
 
+export const probeGPUMemory = async (): Promise<number> => {
+  const adapter = await navigator.gpu.requestAdapter({
+    powerPreference: "low-power",
+  });
+  if (!adapter) throw new Error("No adapter found");
+  const device = await adapter.requestDevice();
+  if (!device) throw new Error("No device found");
+  const maxBufferSize = device.limits.maxStorageBufferBindingSize;
+  const buffers = [];
+  let successfulAllocation = true;
+  let totalAllocated = 0;
+  while (successfulAllocation) {
+    let allocationSize = maxBufferSize;
+    successfulAllocation = false;
+    while (allocationSize >= 64 * 1024 * 1024) {
+      device.pushErrorScope("out-of-memory");
+      const buffer = device.createBuffer({
+        size: allocationSize,
+        usage: GPUBufferUsage.STORAGE,
+      });
+      const res = await Promise.race([device.lost, device.popErrorScope()]);
+      if (res instanceof GPUOutOfMemoryError) {
+        allocationSize /= 2;
+        console.log("Allocation failed, retrying with size", allocationSize);
+      } else if (res instanceof GPUDeviceLostInfo) {
+        console.log("Device lost, exiting", res.message);
+        return totalAllocated;
+      } else {
+        buffers.push(buffer);
+        totalAllocated += allocationSize;
+        successfulAllocation = true;
+        break;
+      }
+    }
+  }
+  for (const buffer of buffers) buffer.destroy();
+  device.destroy();
+  return totalAllocated;
+};
+
 export const bigIntsToU16Array = (beBigInts: bigint[]): Uint16Array => {
   const intsAs16s = beBigInts.map((bigInt) => bigIntToU16Array(bigInt));
   const u16Array = new Uint16Array(beBigInts.length * 16);

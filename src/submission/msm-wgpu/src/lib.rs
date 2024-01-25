@@ -8,6 +8,7 @@ use std::convert::TryInto;
 use ark_ec::{CurveGroup, Group};
 use ark_ed_on_bls12_377::EdwardsProjective;
 use ark_ff::Zero;
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 
 use crate::bytes::{read_points, write_fq, N_U32S_PER_POINT};
@@ -35,20 +36,6 @@ pub enum BucketSumImplementation {
 pub struct Options {
     pub bucket_impl: BucketImplementation,
     pub bucket_sum_impl: BucketSumImplementation,
-}
-
-#[wasm_bindgen::prelude::wasm_bindgen]
-#[cfg(target = "wasm32-unknown-unknown")]
-pub async fn compute_msm_js(
-    points_flat: &[u32],
-    scalars_flat: &[u32],
-    options: wasm_bindgen::prelude::JsValue,
-) -> web_sys::js_sys::Uint32Array {
-    crate::utils::set_panic_hook();
-    console_log::init_with_level(log::Level::Info).unwrap();
-    let options: Options = serde_wasm_bindgen::from_value(options).expect("invalid options");
-    let result = compute_msm(points_flat, scalars_flat, options).await;
-    web_sys::js_sys::Uint32Array::from(&result[..])
 }
 
 pub async fn compute_msm(points_flat: &[u32], scalars_flat: &[u32], options: Options) -> [u32; 16] {
@@ -83,27 +70,62 @@ pub async fn compute_msm(points_flat: &[u32], scalars_flat: &[u32], options: Opt
     match options.bucket_impl {
         BucketImplementation::Cpu => {
             time_begin("bucketing (cpu)");
-            for splitted_scalars in splitted.iter() {
-                let bucket = bucket_cpu(splitted_scalars, &points, N_BUCKETS);
-                buckets.push(bucket);
-            }
+            buckets = splitted
+                .par_iter()
+                .map(|splitted_scalars| bucket_cpu(splitted_scalars, &points, N_BUCKETS))
+                .collect::<Vec<_>>();
             time_end("bucketing (cpu)");
         }
         BucketImplementation::Gpu => {
             time_begin("bucketing (gpu)");
-            // let bucketer = gpu::bucket::GpuBucketer::new(&gpu_context);
-            // for splitted_scalars in splitted.iter() {
-            //     let bucket = bucketer.bucket(splitted_scalars, &points, N_BUCKETS).await;
+            let bucketer = gpu::bucket::GpuBucketer::new(&gpu_context, N_BUCKETS);
+
+            let mut preprocessed = Some(bucketer.preprocess(&splitted[0], &points));
+
+            for i in 0..Splitter::N_WINDOWS {
+                let mut next_preprocessed = None;
+                let interlude = {
+                    let next_preprocessed = &mut next_preprocessed;
+                    let points = &points;
+                    let bucketer = &bucketer;
+                    let splitted = &splitted;
+                    move || {
+                        if i + 1 < Splitter::N_WINDOWS {
+                            *next_preprocessed =
+                                Some(bucketer.preprocess(&splitted[i + 1], points));
+                        }
+                    }
+                };
+                let bucket = bucketer
+                    .bucket(preprocessed.take().unwrap(), interlude)
+                    .await;
+                preprocessed = next_preprocessed;
+                buckets.push(bucket);
+            }
+
+            // for splitted_scalars in splitted.iter().skip(1) {
+            //     let mut next_preprocessed = None;
+            //     let bucket = bucketer
+            //         .bucket(&p, {
+            //             let next_preprocessed = &mut next_preprocessed;
+            //             move || {
+            //                 *next_preprocessed = Some(bucketer.preprocess(&splitted[0], &points));
+            //             }
+            //         })
+            //         .await;
+            //     preprocessed = next_preprocessed.unwrap();
             //     buckets.push(bucket);
             // }
-            buckets.extend(
-                futures::future::join_all(splitted.iter().map(|scalars| {
-                    let bucketer = gpu::bucket::GpuBucketer::new(&gpu_context);
-                    let points = &points;
-                    async move { bucketer.bucket(scalars, points, N_BUCKETS).await }
-                }))
-                .await,
-            );
+            // A theoretically more parallelizable version of the above:
+            // However this could lead to obscure errors down the line, so don't?
+            // buckets.extend(
+            //     futures::future::join_all(splitted.iter().map(|scalars| {
+            //         let bucketer = gpu::bucket::GpuBucketer::new(&gpu_context);
+            //         let points = &points;
+            //         async move { bucketer.bucket(scalars, points, N_BUCKETS).await }
+            //     }))
+            //     .await,
+            // );
             time_end("bucketing (gpu)");
         }
     }
@@ -112,7 +134,10 @@ pub async fn compute_msm(points_flat: &[u32], scalars_flat: &[u32], options: Opt
     match options.bucket_sum_impl {
         BucketSumImplementation::Cpu => {
             time_begin("summing (cpu)");
-            bucket_sums = buckets.into_iter().map(bucket_sum_cpu).collect::<Vec<_>>();
+            bucket_sums = buckets
+                .into_par_iter()
+                .map(bucket_sum_cpu)
+                .collect::<Vec<_>>();
             time_end("summing (cpu)");
         }
         BucketSumImplementation::Gpu => {
@@ -181,4 +206,31 @@ fn bucket_sum_cpu(bucket: Vec<EdwardsProjective>) -> EdwardsProjective {
         sum += carry;
     }
     sum
+}
+
+// WASM bindings
+
+#[cfg(target_arch = "wasm32")]
+pub use wasm_bindgen_rayon::init_thread_pool;
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
+#[cfg(target_arch = "wasm32")]
+static INIT: std::sync::Once = std::sync::Once::new();
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub async fn compute_msm_js(
+    points_flat: &[u32],
+    scalars_flat: &[u32],
+    options: JsValue,
+) -> js_sys::Uint32Array {
+    INIT.call_once(|| {
+        console_log::init_with_level(log::Level::Info).unwrap();
+    });
+    crate::utils::set_panic_hook();
+    let options: Options = serde_wasm_bindgen::from_value(options).expect("invalid options");
+    let result = compute_msm(points_flat, scalars_flat, options).await;
+    js_sys::Uint32Array::from(&result[..])
 }

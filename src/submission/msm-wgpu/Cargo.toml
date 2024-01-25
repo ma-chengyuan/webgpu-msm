@@ -22,10 +22,12 @@ flume = "0.11.0"
 futures = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 static_assertions = "1.1"
+rayon = "1.8"
 
-[target.wasm32-unknown-unknown.dependencies]
+[target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2.84"
 wasm-bindgen-futures = "0.4"
+wasm-bindgen-rayon = "1.2"
 serde-wasm-bindgen = "0.4"
 console_log = "1.0"
 js-sys = "0.3"
@@ -41,9 +43,10 @@ web-sys = { version = "0.3.67", features = [
 # code size when deploying.
 console_error_panic_hook = { version = "0.1.7", optional = true }
 
-[dev-dependencies]
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3.34"
 
 [profile.release]
 # Tell `rustc` to optimize for small code size.
-opt-level = "s"
+# opt-level = "s"
+debug = true

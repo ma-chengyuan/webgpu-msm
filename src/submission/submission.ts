@@ -1,5 +1,12 @@
 import { BigIntPoint, U32ArrayPoint } from "../reference/types";
-import { bigIntToU32Array, u32ArrayToBigInts } from "./utils";
+import { bigIntToU32Array, u32ArrayToBigInts, probeGPUMemory } from "./utils";
+
+import init, {
+  compute_msm_js,
+  initThreadPool,
+} from "./msm-wgpu/pkg/msm_wgpu.js";
+
+let initialized = false;
 
 type MSMOptions = {
   bucketImpl: "gpu" | "cpu";
@@ -10,6 +17,7 @@ export const compute_msm = async (
   baseAffinePoints: BigIntPoint[] | U32ArrayPoint[],
   scalars: bigint[] | Uint32Array[]
 ): Promise<{ x: bigint; y: bigint }> => {
+  console.time("convert");
   const pointBuffer = new Uint32Array(baseAffinePoints.length * 32);
   for (let i = 0; i < baseAffinePoints.length; i++) {
     const p = baseAffinePoints[i];
@@ -27,24 +35,22 @@ export const compute_msm = async (
     const s = scalars[i];
     scalarBuffer.set(typeof s === "bigint" ? bigIntToU32Array(s) : s, i * 8);
   }
+  console.timeEnd("convert");
 
-  const worker = new Worker(new URL("worker.js", import.meta.url));
+  // const worker = new Worker(new URL("worker.js", import.meta.url));
+
+  if (!initialized) {
+    await init();
+    await initThreadPool(navigator.hardwareConcurrency);
+    initialized = true;
+  }
+
   const options: MSMOptions = {
     bucketImpl: "gpu",
     bucketSumImpl: "cpu",
   };
-  worker.postMessage(
-    {
-      points: pointBuffer,
-      scalars: scalarBuffer,
-      options,
-    },
-    [pointBuffer.buffer, scalarBuffer.buffer]
-  );
-  return new Promise((resolve) => {
-    worker.onmessage = (event) => {
-      const result = u32ArrayToBigInts(event.data.result);
-      resolve({ x: result[0], y: result[1] });
-    };
-  });
+
+  const result = await compute_msm_js(pointBuffer, scalarBuffer, options);
+  const resultBigInts = u32ArrayToBigInts(result);
+  return { x: resultBigInts[0], y: resultBigInts[1] };
 };
