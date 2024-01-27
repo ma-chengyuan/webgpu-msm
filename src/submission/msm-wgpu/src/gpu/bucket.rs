@@ -7,7 +7,6 @@ use crate::gpu::{
     dispatch, map_buffers, BufferBinding, GpuDeviceQueue, CURVE_WGSL, FIELD_MODULUS_WGSL,
     U256_WGSL,
 };
-use crate::utils::{time_begin, time_end};
 
 pub struct GpuBucketer<'a> {
     device: &'a wgpu::Device,
@@ -171,7 +170,7 @@ impl<'a> GpuBucketer<'a> {
             offsets[n_threads as usize] = (end - start) as u32;
 
             self.queue
-                .write_buffer(&points_buffer, 0, bytemuck::cast_slice(&points));
+                .write_buffer(&points_buffer, 0, bytemuck::cast_slice(points));
             self.queue
                 .write_buffer(&offsets_buffer, 0, bytemuck::cast_slice(&offsets));
             self.queue

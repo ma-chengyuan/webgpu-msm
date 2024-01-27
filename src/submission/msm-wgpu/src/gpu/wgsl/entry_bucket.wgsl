@@ -21,7 +21,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     var point = sums[bucket];
     for (var i = offset; i < next_offset; i++) {
-        point = add_points(point, points[i]);
+        var cur_point = points[i];
+        point = add_points(&point, &cur_point);
     }
     sums[bucket] = point;
 }
