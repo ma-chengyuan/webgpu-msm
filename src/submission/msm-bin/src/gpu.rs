@@ -1,26 +1,14 @@
 #![allow(dead_code)]
-pub mod bucket;
-pub mod bucket_sum;
-pub mod mont;
 
 use wgpu::util::DeviceExt;
 
-const U256_WGSL: &str = include_str!("./wgsl/u256.wgsl");
-const FIELD_MODULUS_WGSL: &str = include_str!("./wgsl/field_modulus.wgsl");
-const CURVE_WGSL: &str = include_str!("./wgsl/curve.wgsl");
-const ARITH_WGSL: &str = include_str!("./wgsl/arith.wgsl");
-
 pub struct GpuDeviceQueue {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
 }
 
 impl GpuDeviceQueue {
     pub async fn new() -> Self {
-        // let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        //     backends: wgpu::Backends::DX12,
-        //     ..Default::default()
-        // });
         let instance = wgpu::Instance::default();
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -42,59 +30,14 @@ impl GpuDeviceQueue {
             .expect("failed to create device");
         Self { device, queue }
     }
-
-    /// Probes the maximum amount of VRAM that can be allocated.
-    ///
-    /// Does not work for some GPUs as of 2024-01-29. Sometimes the device is
-    /// simply lost instead of returning a memory error. And Rust wgpu does not
-    /// yet have the ability to detect device loss
-    /// (see https://github.com/gfx-rs/wgpu/blob/950d765a4d18c79e5fde3655ef507f04bae58101/wgpu/src/backend/webgpu.rs#L1973)
-    pub async fn probe_max_vram(&self) -> u64 {
-        let max_buffer_size = self.device.limits().max_storage_buffer_binding_size;
-        let mut buffers = vec![];
-        let mut successful_allocation = true;
-        while successful_allocation {
-            let mut allocation_size = max_buffer_size;
-            successful_allocation = false;
-            while allocation_size >= 64 * 1024 * 1024 {
-                self.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
-                let new_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-                    label: None,
-                    size: allocation_size as u64,
-                    usage: wgpu::BufferUsages::STORAGE,
-                    mapped_at_creation: false,
-                });
-                match self.device.pop_error_scope().await {
-                    None => {
-                        successful_allocation = true;
-                        buffers.push(new_buffer);
-                        break;
-                    }
-                    Some(_) => {
-                        allocation_size /= 2;
-                    }
-                }
-            }
-        }
-        buffers
-            .into_iter()
-            .map(|buffer| {
-                let size = buffer.size();
-                buffer.destroy();
-                size
-            })
-            .sum()
-    }
 }
 
-enum BufferBinding {
+pub(crate) enum BufferBinding {
     ReadOnly,
     ReadWrite,
-    DynamicReadOnly,
-    DynamicReadWrite,
 }
 
-fn create_pipeline(
+pub(crate) fn create_pipeline(
     device: &wgpu::Device,
     shader_source: &str,
     buffer_bindings: &[BufferBinding],
@@ -108,19 +51,15 @@ fn create_pipeline(
         .enumerate()
         .map(|(i, binding)| {
             let read_only = match binding {
-                BufferBinding::ReadOnly | BufferBinding::DynamicReadOnly => true,
-                BufferBinding::ReadWrite | BufferBinding::DynamicReadWrite => false,
-            };
-            let dynamic = match binding {
-                BufferBinding::DynamicReadOnly | BufferBinding::DynamicReadWrite => true,
-                BufferBinding::ReadOnly | BufferBinding::ReadWrite => false,
+                BufferBinding::ReadOnly => true,
+                BufferBinding::ReadWrite => false,
             };
             wgpu::BindGroupLayoutEntry {
                 binding: i as u32,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only },
-                    has_dynamic_offset: dynamic,
+                    has_dynamic_offset: false,
                     min_binding_size: None,
                 },
                 count: None,
@@ -145,7 +84,7 @@ fn create_pipeline(
     })
 }
 
-fn create_buffer(device: &wgpu::Device, size: u64) -> wgpu::Buffer {
+pub(crate) fn create_buffer(device: &wgpu::Device, size: u64) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
         size,
@@ -156,7 +95,7 @@ fn create_buffer(device: &wgpu::Device, size: u64) -> wgpu::Buffer {
     })
 }
 
-fn create_buffer_init(device: &wgpu::Device, contents: &[u8]) -> wgpu::Buffer {
+pub(crate) fn create_buffer_init(device: &wgpu::Device, contents: &[u8]) -> wgpu::Buffer {
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: None,
         contents,
@@ -166,7 +105,7 @@ fn create_buffer_init(device: &wgpu::Device, contents: &[u8]) -> wgpu::Buffer {
     })
 }
 
-fn create_staging_buffer(device: &wgpu::Device, size: u64) -> wgpu::Buffer {
+pub(crate) fn create_staging_buffer(device: &wgpu::Device, size: u64) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
         size,
@@ -175,7 +114,7 @@ fn create_staging_buffer(device: &wgpu::Device, size: u64) -> wgpu::Buffer {
     })
 }
 
-fn create_bind_group(
+pub(crate) fn create_bind_group(
     device: &wgpu::Device,
     pipeline: &wgpu::ComputePipeline,
     buffers: &[&wgpu::Buffer],
@@ -194,7 +133,7 @@ fn create_bind_group(
     })
 }
 
-fn dispatch(
+pub(crate) fn dispatch(
     command_encoder: &mut wgpu::CommandEncoder,
     pipeline: &wgpu::ComputePipeline,
     bind_group: &wgpu::BindGroup,

@@ -1,5 +1,5 @@
 mod bytes;
-mod gpu;
+pub mod gpu;
 mod split;
 mod utils;
 
@@ -8,6 +8,7 @@ use std::convert::TryInto;
 use ark_ec::{CurveGroup, Group};
 use ark_ed_on_bls12_377::EdwardsProjective;
 use ark_ff::Zero;
+use bytemuck::{Pod, Zeroable};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 
@@ -32,13 +33,22 @@ pub enum BucketSumImplementation {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-
 pub struct Options {
     pub bucket_impl: BucketImplementation,
     pub bucket_sum_impl: BucketSumImplementation,
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Zeroable, Pod)]
+pub struct PodPoint {
+    pub x: [u32; 8],
+    pub y: [u32; 8],
+    pub t: [u32; 8],
+    pub z: [u32; 8],
+}
+
 pub async fn compute_msm(points_flat: &[u32], scalars_flat: &[u32], options: Options) -> [u32; 16] {
+    time_end("ffi");
     type Splitter = Split16;
     const N_BUCKETS: usize = 1 << Splitter::WINDOW_SIZE;
     let gpu_context = gpu::GpuDeviceQueue::new().await;
@@ -49,8 +59,9 @@ pub async fn compute_msm(points_flat: &[u32], scalars_flat: &[u32], options: Opt
     debug_assert_eq!(scalars_flat.len() % 8, 0);
     debug_assert_eq!(scalars_flat.len() / 8, n_points);
 
-    let points = read_points(points_flat);
+    // let points = read_points(points_flat);
 
+    time_begin("split");
     let mut splitted: Vec<Vec<u32>> = (0..Splitter::N_WINDOWS)
         .map(|_| Vec::with_capacity(n_points))
         .collect();
@@ -65,11 +76,13 @@ pub async fn compute_msm(points_flat: &[u32], scalars_flat: &[u32], options: Opt
             splitted[j].push(*splitted_scalar);
         }
     }
+    time_end("split");
 
     let mut buckets = Vec::with_capacity(Splitter::N_WINDOWS);
     match options.bucket_impl {
         BucketImplementation::Cpu => {
             time_begin("bucketing (cpu)");
+            let points = read_points(points_flat);
             buckets = splitted
                 .par_iter()
                 .map(|splitted_scalars| bucket_cpu(splitted_scalars, &points, N_BUCKETS))
@@ -78,42 +91,39 @@ pub async fn compute_msm(points_flat: &[u32], scalars_flat: &[u32], options: Opt
         }
         BucketImplementation::Gpu => {
             time_begin("bucketing (gpu)");
-            let bucketer = gpu::bucket::GpuBucketer::new(&gpu_context, N_BUCKETS);
-
-            let mut preprocessed = Some(bucketer.preprocess(&splitted[0], &points));
-
-            for i in 0..Splitter::N_WINDOWS {
-                let mut next_preprocessed = None;
-                let interlude = {
-                    let next_preprocessed = &mut next_preprocessed;
-                    let points = &points;
-                    let bucketer = &bucketer;
-                    let splitted = &splitted;
-                    move || {
-                        if i + 1 < Splitter::N_WINDOWS {
-                            *next_preprocessed =
-                                Some(bucketer.preprocess(&splitted[i + 1], points));
-                        }
-                    }
-                };
-                let bucket = bucketer
-                    .bucket(preprocessed.take().unwrap(), interlude)
-                    .await;
-                preprocessed = next_preprocessed;
-                buckets.push(bucket);
+            // let bucketer = gpu::bucket::GpuBucketer::new(&gpu_context, N_BUCKETS);
+            let test_reducer = gpu::bucket::GpuIntraBucketReducer::new(&gpu_context, N_BUCKETS);
+            let mut raw_buckets = Vec::with_capacity(Splitter::N_WINDOWS);
+            for splitted_scalars in splitted.iter() {
+                raw_buckets.push(
+                    test_reducer
+                        .reduce(splitted_scalars, bytemuck::cast_slice(points_flat))
+                        .await,
+                );
             }
-
-            // for splitted_scalars in splitted.iter().skip(1) {
+            buckets = raw_buckets
+                .par_iter()
+                .map(|raw_buckets| read_points(raw_buckets))
+                .collect::<Vec<_>>();
+            // let mut preprocessed = Some(bucketer.preprocess(&splitted[0], &points));
+            // for i in 0..Splitter::N_WINDOWS {
             //     let mut next_preprocessed = None;
-            //     let bucket = bucketer
-            //         .bucket(&p, {
-            //             let next_preprocessed = &mut next_preprocessed;
-            //             move || {
-            //                 *next_preprocessed = Some(bucketer.preprocess(&splitted[0], &points));
+            //     let interlude = {
+            //         let next_preprocessed = &mut next_preprocessed;
+            //         let points = &points;
+            //         let bucketer = &bucketer;
+            //         let splitted = &splitted;
+            //         move || {
+            //             if i + 1 < Splitter::N_WINDOWS {
+            //                 *next_preprocessed =
+            //                     Some(bucketer.preprocess(&splitted[i + 1], points));
             //             }
-            //         })
+            //         }
+            //     };
+            //     let bucket = bucketer
+            //         .bucket(preprocessed.take().unwrap(), interlude)
             //         .await;
-            //     preprocessed = next_preprocessed.unwrap();
+            //     preprocessed = next_preprocessed;
             //     buckets.push(bucket);
             // }
             // A theoretically more parallelizable version of the above:
@@ -206,6 +216,64 @@ fn bucket_sum_cpu(bucket: Vec<EdwardsProjective>) -> EdwardsProjective {
         sum += carry;
     }
     sum
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn split_16(scalars_flat: &[u32]) -> Vec<u32> {
+    type Splitter = Split16;
+
+    INIT.call_once(|| {
+        console_log::init_with_level(log::Level::Info).unwrap();
+    });
+    crate::utils::set_panic_hook();
+
+    debug_assert_eq!(scalars_flat.len() % 8, 0);
+    let n_points = scalars_flat.len() / 8;
+    let mut result = vec![0u32; n_points * Splitter::N_WINDOWS];
+    for i in 0..n_points {
+        let slice: &[u32; 8] = unsafe {
+            (&scalars_flat[8 * i..8 * i + 8])
+                .try_into()
+                .unwrap_unchecked()
+        };
+        let splitted_scalars = Splitter::split(slice);
+        for (j, splitted_scalar) in splitted_scalars.iter().enumerate() {
+            result[j * n_points + i] = *splitted_scalar;
+        }
+    }
+    result
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn inter_bucket_reduce_16(raw_buckets: Vec<wasm_bindgen::JsValue>) -> Vec<u32> {
+    type Splitter = Split16;
+
+    let buckets = raw_buckets
+        .into_iter()
+        .map(|raw_bucket| {
+            let bucket: js_sys::Uint32Array = raw_bucket.into();
+            read_points(&bucket.to_vec())
+        })
+        .collect::<Vec<_>>();
+    let bucket_sums = buckets
+        .into_par_iter()
+        .map(bucket_sum_cpu)
+        .collect::<Vec<_>>();
+    let mut sum = EdwardsProjective::zero();
+    for bucket_sum in bucket_sums {
+        for _ in 0..Splitter::WINDOW_SIZE {
+            sum.double_in_place();
+        }
+        sum += bucket_sum;
+    }
+
+    let result_affine = sum.into_affine();
+    let mut result_buf = vec![0u32; 16];
+    write_fq(&mut result_buf[0..8], &result_affine.x);
+    write_fq(&mut result_buf[8..16], &result_affine.y);
+    result_buf
 }
 
 // WASM bindings

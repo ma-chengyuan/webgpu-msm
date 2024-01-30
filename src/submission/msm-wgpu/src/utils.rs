@@ -34,7 +34,6 @@ static START_TIMESTAMP: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::ne
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn time_begin(label: &str) {
-    log::info!("HERE");
     let timestamps = START_TIMESTAMP.get_or_init(|| Mutex::new(HashMap::new()));
     let mut timestamps = timestamps.lock().unwrap();
     if timestamps.contains_key(label) {
