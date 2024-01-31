@@ -1,3 +1,6 @@
+// Converts a 256-bit integer to its Montgomery form.
+// Use with arith.wgsl.
+
 @group(0) @binding(0)
 var<storage, read> input: array<u32>;
 @group(0) @binding(1)

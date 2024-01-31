@@ -1,7 +1,6 @@
 #![allow(dead_code)]
-pub mod bucket;
-pub mod bucket_sum;
-pub mod mont;
+pub mod inter_bucket;
+pub mod intra_bucket;
 
 use wgpu::util::DeviceExt;
 

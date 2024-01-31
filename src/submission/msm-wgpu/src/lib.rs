@@ -48,7 +48,6 @@ pub struct PodPoint {
 }
 
 pub async fn compute_msm(points_flat: &[u32], scalars_flat: &[u32], options: Options) -> [u32; 16] {
-    time_end("ffi");
     type Splitter = Split16;
     const N_BUCKETS: usize = 1 << Splitter::WINDOW_SIZE;
     let gpu_context = gpu::GpuDeviceQueue::new().await;
@@ -58,8 +57,6 @@ pub async fn compute_msm(points_flat: &[u32], scalars_flat: &[u32], options: Opt
     let n_points = points_flat.len() / N_U32S_PER_POINT;
     debug_assert_eq!(scalars_flat.len() % 8, 0);
     debug_assert_eq!(scalars_flat.len() / 8, n_points);
-
-    // let points = read_points(points_flat);
 
     time_begin("split");
     let mut splitted: Vec<Vec<u32>> = (0..Splitter::N_WINDOWS)
@@ -77,8 +74,7 @@ pub async fn compute_msm(points_flat: &[u32], scalars_flat: &[u32], options: Opt
         }
     }
     time_end("split");
-
-    let mut buckets = Vec::with_capacity(Splitter::N_WINDOWS);
+    let buckets;
     match options.bucket_impl {
         BucketImplementation::Cpu => {
             time_begin("bucketing (cpu)");
@@ -91,12 +87,11 @@ pub async fn compute_msm(points_flat: &[u32], scalars_flat: &[u32], options: Opt
         }
         BucketImplementation::Gpu => {
             time_begin("bucketing (gpu)");
-            // let bucketer = gpu::bucket::GpuBucketer::new(&gpu_context, N_BUCKETS);
-            let test_reducer = gpu::bucket::GpuIntraBucketReducer::new(&gpu_context, N_BUCKETS);
+            let reducer = gpu::intra_bucket::GpuIntraBucketReducer::new(&gpu_context, N_BUCKETS);
             let mut raw_buckets = Vec::with_capacity(Splitter::N_WINDOWS);
             for splitted_scalars in splitted.iter() {
                 raw_buckets.push(
-                    test_reducer
+                    reducer
                         .reduce(splitted_scalars, bytemuck::cast_slice(points_flat))
                         .await,
                 );
@@ -105,37 +100,6 @@ pub async fn compute_msm(points_flat: &[u32], scalars_flat: &[u32], options: Opt
                 .par_iter()
                 .map(|raw_buckets| read_points(raw_buckets))
                 .collect::<Vec<_>>();
-            // let mut preprocessed = Some(bucketer.preprocess(&splitted[0], &points));
-            // for i in 0..Splitter::N_WINDOWS {
-            //     let mut next_preprocessed = None;
-            //     let interlude = {
-            //         let next_preprocessed = &mut next_preprocessed;
-            //         let points = &points;
-            //         let bucketer = &bucketer;
-            //         let splitted = &splitted;
-            //         move || {
-            //             if i + 1 < Splitter::N_WINDOWS {
-            //                 *next_preprocessed =
-            //                     Some(bucketer.preprocess(&splitted[i + 1], points));
-            //             }
-            //         }
-            //     };
-            //     let bucket = bucketer
-            //         .bucket(preprocessed.take().unwrap(), interlude)
-            //         .await;
-            //     preprocessed = next_preprocessed;
-            //     buckets.push(bucket);
-            // }
-            // A theoretically more parallelizable version of the above:
-            // However this could lead to obscure errors down the line, so don't?
-            // buckets.extend(
-            //     futures::future::join_all(splitted.iter().map(|scalars| {
-            //         let bucketer = gpu::bucket::GpuBucketer::new(&gpu_context);
-            //         let points = &points;
-            //         async move { bucketer.bucket(scalars, points, N_BUCKETS).await }
-            //     }))
-            //     .await,
-            // );
             time_end("bucketing (gpu)");
         }
     }
@@ -159,8 +123,8 @@ pub async fn compute_msm(points_flat: &[u32], scalars_flat: &[u32], options: Opt
             // }
             bucket_sums.extend(
                 futures::future::join_all(buckets.into_iter().map(|bucket| {
-                    let bucket_summer = gpu::bucket_sum::GpuBucketSummer::new(&gpu_context);
-                    async move { bucket_summer.bucket_sum(&bucket).await }
+                    let bucket_summer = gpu::inter_bucket::GpuInterBucketReducer::new(&gpu_context);
+                    async move { bucket_summer.reduce(&bucket).await }
                 }))
                 .await,
             );
@@ -246,20 +210,16 @@ pub fn split_16(scalars_flat: &[u32]) -> Vec<u32> {
 }
 
 #[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn inter_bucket_reduce_16(raw_buckets: Vec<wasm_bindgen::JsValue>) -> Vec<u32> {
-    type Splitter = Split16;
+use rayon::prelude::ParallelSlice;
 
-    let buckets = raw_buckets
-        .into_iter()
-        .map(|raw_bucket| {
-            let bucket: js_sys::Uint32Array = raw_bucket.into();
-            read_points(&bucket.to_vec())
-        })
-        .collect::<Vec<_>>();
-    let bucket_sums = buckets
-        .into_par_iter()
-        .map(bucket_sum_cpu)
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn inter_bucket_reduce_16(raw_buckets: &[u32]) -> Vec<u32> {
+    type Splitter = Split16;
+    let chunk_size = raw_buckets.len() / Splitter::N_WINDOWS;
+    let bucket_sums = raw_buckets
+        .par_chunks(chunk_size)
+        .map(|chunk| bucket_sum_cpu(read_points(chunk)))
         .collect::<Vec<_>>();
     let mut sum = EdwardsProjective::zero();
     for bucket_sum in bucket_sums {
@@ -268,7 +228,6 @@ pub fn inter_bucket_reduce_16(raw_buckets: Vec<wasm_bindgen::JsValue>) -> Vec<u3
         }
         sum += bucket_sum;
     }
-
     let result_affine = sum.into_affine();
     let mut result_buf = vec![0u32; 16];
     write_fq(&mut result_buf[0..8], &result_affine.x);

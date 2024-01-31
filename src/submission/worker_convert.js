@@ -8,12 +8,13 @@ onmessage = (event) => {
    */
   const data = event.data;
   const points = data.points;
+  console.timeStamp("data received");
   const pointBuffer = new Uint32Array(points.length * 32);
   const scalars = data.scalars;
   const scalarBuffer = new Uint32Array(scalars.length * 8);
 
   if (points.length > 0 && typeof points[0].x === "bigint") {
-    const mask = 0xffffffffn;
+    // const mask = 0xffffffff;
     for (let i = 0; i < points.length; i++) {
       /**
        * @type {BigIntPoint}
@@ -22,7 +23,7 @@ onmessage = (event) => {
       let idx = i * 32;
       for (let c of [p.x, p.y, p.t, p.z]) {
         for (let j = 7; j >= 0; j--) {
-          pointBuffer[idx + j] = Number(c & mask);
+          pointBuffer[idx + j] = Number(BigInt.asUintN(32, c));
           c >>= 32n;
         }
         idx += 8;
@@ -62,5 +63,6 @@ onmessage = (event) => {
     pointBuffer.buffer,
     scalarBuffer.buffer,
   ]);
+  console.timeStamp("data sent");
   close();
 };

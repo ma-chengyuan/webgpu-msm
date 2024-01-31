@@ -7,13 +7,13 @@ use crate::gpu::{
     create_bind_group, create_buffer, create_pipeline, create_staging_buffer, dispatch,
     map_buffers, BufferBinding, GpuDeviceQueue, CURVE_WGSL, FIELD_MODULUS_WGSL, U256_WGSL,
 };
-pub struct GpuBucketSummer<'a> {
+pub struct GpuInterBucketReducer<'a> {
     device: &'a wgpu::Device,
     queue: &'a wgpu::Queue,
     pipeline: wgpu::ComputePipeline,
 }
 
-impl<'a> GpuBucketSummer<'a> {
+impl<'a> GpuInterBucketReducer<'a> {
     pub fn new(dq: &'a GpuDeviceQueue) -> Self {
         let (device, queue) = (&dq.device, &dq.queue);
         Self {
@@ -40,7 +40,7 @@ impl<'a> GpuBucketSummer<'a> {
 
     /// Given a slice of points, compute
     ///   sum_{i=0}^{n-1} i * points[i]
-    pub async fn bucket_sum(&self, points: &[EdwardsProjective]) -> EdwardsProjective {
+    pub async fn reduce(&self, points: &[EdwardsProjective]) -> EdwardsProjective {
         // Total VRAM
         const MAX_BATCH_SIZE: usize = 32768;
         const_assert!(MAX_BATCH_SIZE % 64 == 0);

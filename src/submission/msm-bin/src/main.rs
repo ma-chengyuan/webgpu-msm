@@ -1,9 +1,6 @@
-mod gpu;
-mod test;
 use std::{str::FromStr, vec};
 
 use anyhow::{bail, Result};
-use ark_ed_on_bls12_377::EdwardsProjective;
 use itertools::Itertools;
 use msm_wgpu::{compute_msm, Options};
 use num_bigint::BigUint;
@@ -52,41 +49,11 @@ fn get_ref_answer(power: usize) -> (BigUint, BigUint) {
     (BigUint::from_str(x).unwrap(), BigUint::from_str(y).unwrap())
 }
 
-async fn load_arc_points(power: u32) -> Result<Vec<EdwardsProjective>> {
-    use ark_ed_on_bls12_377::Fq;
-    use ark_ff::PrimeField;
-
-    let points_file = File::open(format!(
-        "../../../public/test-data/points/{}-power-points.txt",
-        power
-    ))
-    .await?;
-    let reader = BufReader::new(points_file);
-    let mut lines = reader.lines();
-    let mut points = vec![];
-    while let Some(next_line) = lines.next_line().await? {
-        let point: InputPoint = serde_json::from_str(&next_line)?;
-        let make_fq = |s: &str| {
-            let big_uint = BigUint::from_str(s).unwrap();
-            Fq::from_le_bytes_mod_order(&big_uint.to_bytes_le())
-        };
-        points.push(EdwardsProjective::new_unchecked(
-            make_fq(&point.x),
-            make_fq(&point.y),
-            make_fq(&point.t),
-            make_fq(&point.z),
-        ));
-    }
-    Ok(points)
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::builder()
         .filter_level(log::LevelFilter::Info)
         .init();
-
-    // return test::main_test().await;
 
     let power = std::env::args()
         .nth(1)

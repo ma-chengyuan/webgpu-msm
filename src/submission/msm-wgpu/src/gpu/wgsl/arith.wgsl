@@ -1,3 +1,10 @@
+// Warp-based finite field arithmetic 
+// Due to the lack of warp-level primitives in WebGPU (as of Feb 2024), many
+// places where a warp shuffle suffices needs to be implemented via writes to
+// shared memory & barriers. This makes it very inefficient. But hopefully when 
+// WebGPU's subgroup proposal gets merged into spec, we will have a chance to
+// revisit this and make it more efficient.
+
 // Modulo
 const N: array<u32, 16> = array<u32, 16>(0, 0, 0, 0, 0, 0, 0, 0, 1, 168919040, 3489660929, 1504343806, 1547153409, 1622428958, 2586617174, 313222494);
 // For use in Montgomery multiplication

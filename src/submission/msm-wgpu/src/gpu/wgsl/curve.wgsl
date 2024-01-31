@@ -90,6 +90,8 @@ fn add_points_in_place(p1: ptr<function, Point>, p2: ptr<function, Point>) {
     (*p1).z = field_multiply(&f, &g);
 }
 
+// The functions below have not been touched during refactoring so they are not guaranteed to work.
+
 // fn neg_point(p: Point) -> Point {
 //     return Point(mul_by_a(p.x), p.y, p.t, mul_by_a(p.z));
 // }
