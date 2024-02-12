@@ -90,30 +90,30 @@ fn add_points_in_place(p1: ptr<function, Point>, p2: ptr<function, Point>) {
     (*p1).z = field_multiply(&f, &g);
 }
 
+fn double_point_in_place(p: ptr<function, Point>) {
+    var p_x = (*p).x;
+    var p_y = (*p).y;
+    var p_z = (*p).z;
+    var p_t = (*p).t;
+
+    var a = field_multiply(&p_x, &p_x);
+    var b = field_multiply(&p_y, &p_y);
+    var c = field_multiply(&p_z, &p_z);
+    field_double_in_place(&c);
+    var d = mul_by_a(&a);
+    var h = field_sub(&d, &b); // -a - b = -(a + b)
+    var e = field_add(&p_x, &p_y);
+    e = field_multiply(&e, &e);
+    e = field_add(&e, &h);
+    var g = field_add(&d, &b);
+    var f = field_sub(&g, &c);
+    (*p).x = field_multiply(&e, &f);
+    (*p).y = field_multiply(&g, &h);
+    (*p).t = field_multiply(&e, &h);
+    (*p).z = field_multiply(&f, &g);
+}
+
 // The functions below have not been touched during refactoring so they are not guaranteed to work.
-
-// fn neg_point(p: Point) -> Point {
-//     return Point(mul_by_a(p.x), p.y, p.t, mul_by_a(p.z));
-// }
-
-// fn double_point(p: Point) -> Point {
-//     var a = field_multiply(p.x, p.x);
-//     var b = field_multiply(p.y, p.y);
-//     var c = field_double(field_multiply(p.z, p.z));
-//     var d = mul_by_a(a);
-//     var e = field_add(p.x, p.y);
-//     e = field_multiply(e, e);
-//     e = field_sub(e, a);
-//     e = field_sub(e, b);
-//     var g = field_add(d, b);
-//     var f = field_sub(g, c);
-//     var h = field_sub(d, b);
-//     var doubled_x = field_multiply(e, f);
-//     var doubled_y = field_multiply(g, h);
-//     var doubled_t = field_multiply(e, h);
-//     var doubled_z = field_multiply(f, g);
-//     return Point(doubled_x, doubled_y, doubled_t, doubled_z);
-// }
 
 // fn mul_point(p: Point, scalar: Field) -> Point {
 //     var result: Point = Point(U256_ZERO, U256_ONE, U256_ZERO, U256_ONE);

@@ -235,6 +235,44 @@ pub fn inter_bucket_reduce_16(raw_buckets: &[u32]) -> Vec<u32> {
     result_buf
 }
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn inter_bucket_reduce_last(raw_buckets: &[u32]) -> Vec<u32> {
+    type Splitter = Split16;
+    let bucket_sums = read_points(raw_buckets);
+    let mut sum = EdwardsProjective::zero();
+    for bucket_sum in bucket_sums {
+        for _ in 0..Splitter::WINDOW_SIZE {
+            sum.double_in_place();
+        }
+        sum += bucket_sum;
+    }
+    let result_affine = sum.into_affine();
+    let mut result_buf = vec![0u32; 16];
+    write_fq(&mut result_buf[0..8], &result_affine.x);
+    write_fq(&mut result_buf[8..16], &result_affine.y);
+    result_buf
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn debug_compare(inputs: &[u32], outputs: &[u32]) {
+    let inputs = read_points(inputs);
+    let outputs = read_points(outputs);
+    for i in (0..inputs.len()).step_by(2) {
+        let p1 = inputs[i];
+        let p2 = inputs[i + 1];
+        let n_sum = (p1 + p2) + (p1 + p2);
+        if p2 != outputs[i] {
+            log::error!("{} != {}", p2, outputs[i]);
+        }
+        if n_sum != outputs[i + 1] {
+            log::error!("{} , {} != {}", p1, p2, outputs[i / 2]);
+        }
+    }
+    log::info!("all good!");
+}
+
 // WASM bindings
 
 #[cfg(target_arch = "wasm32")]

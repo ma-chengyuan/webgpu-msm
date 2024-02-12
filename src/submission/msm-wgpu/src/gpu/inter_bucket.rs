@@ -26,7 +26,7 @@ impl<'a> GpuInterBucketReducer<'a> {
                     U256_WGSL,
                     FIELD_MODULUS_WGSL,
                     CURVE_WGSL,
-                    include_str!("./wgsl/entry_bucket_sum.wgsl")
+                    include_str!("./wgsl/entry_inter_bucket.wgsl")
                 ),
                 &[
                     BufferBinding::ReadOnly,
