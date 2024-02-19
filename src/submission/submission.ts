@@ -1,5 +1,4 @@
 import { BigIntPoint, U32ArrayPoint } from "../reference/types";
-import { u32ArrayToBigInts } from "./utils";
 
 import init, {
   split_16,
@@ -20,41 +19,53 @@ export const compute_msm = async (
   const scalarBuffer = new Uint32Array(scalars.length * 8);
 
   console.time("convert points");
-  // At some point the cost of inter-worker communication will outweigh the
-  // benefits of parallelism.
-  const concurrency = Math.min(8, navigator.hardwareConcurrency);
-  const chunkSize = Math.ceil(baseAffinePoints.length / concurrency);
-  const promises = [];
-  for (let i = 0; i < concurrency; i++) {
-    const pointsChunk = baseAffinePoints.slice(
-      i * chunkSize,
-      (i + 1) * chunkSize
-    );
-    const scalarsChunk = scalars.slice(i * chunkSize, (i + 1) * chunkSize);
-    const worker = new Worker(new URL("worker_convert.js", import.meta.url));
-    let resolvePromise: (_: void) => void;
-    promises.push(new Promise<void>((resolve) => (resolvePromise = resolve)));
-    worker.onmessage = (e) => {
-      pointBuffer.set(e.data.pointBuffer, i * chunkSize * 32);
-      scalarBuffer.set(e.data.scalarBuffer, i * chunkSize * 8);
-      console.timeStamp(`end worker ${i}`);
-      resolvePromise();
-    };
-    console.timeStamp(`start worker ${i}`);
-    worker.postMessage({
-      points: pointsChunk,
-      scalars: scalarsChunk,
-    });
+  if (scalars.length > 0 && typeof scalars[0] === "bigint") {
+    // Convert BigInts to Uint32Arrays
+    // At some point the cost of inter-worker communication will outweigh the
+    // benefits of parallelism.
+    const concurrency = Math.min(8, navigator.hardwareConcurrency);
+    const chunkSize = Math.ceil(baseAffinePoints.length / concurrency);
+    const promises = [];
+    for (let i = 0; i < concurrency; i++) {
+      const pointsChunk = baseAffinePoints.slice(
+        i * chunkSize,
+        (i + 1) * chunkSize
+      );
+      const scalarsChunk = scalars.slice(i * chunkSize, (i + 1) * chunkSize);
+      const worker = new Worker(new URL("worker_convert.js", import.meta.url));
+      let resolvePromise: (_: void) => void;
+      promises.push(new Promise<void>((resolve) => (resolvePromise = resolve)));
+      worker.onmessage = (e) => {
+        pointBuffer.set(e.data.pointBuffer, i * chunkSize * 32);
+        scalarBuffer.set(e.data.scalarBuffer, i * chunkSize * 8);
+        console.timeStamp(`end worker ${i}`);
+        resolvePromise();
+      };
+      console.timeStamp(`start worker ${i}`);
+      worker.postMessage({
+        points: pointsChunk,
+        scalars: scalarsChunk,
+      });
+    }
+    await Promise.all(promises);
+  } else {
+    // Convert U32ArrayPoints to Uint32Arrays
+    scalars = scalars as Uint32Array[];
+    baseAffinePoints = baseAffinePoints as U32ArrayPoint[];
+    for (let i = 0; i < scalars.length; i++) {
+      scalarBuffer.set(scalars[i], i * 8);
+      pointBuffer.set(baseAffinePoints[i].x, i * 32);
+      pointBuffer.set(baseAffinePoints[i].y, i * 32 + 8);
+      pointBuffer.set(baseAffinePoints[i].t, i * 32 + 16);
+      pointBuffer.set(baseAffinePoints[i].z, i * 32 + 32);
+    }
   }
-  await Promise.all(promises);
   console.timeEnd("convert points");
-
   if (!initialized) {
     await init();
     await initThreadPool(navigator.hardwareConcurrency);
     initialized = true;
   }
-
   console.time("scalar split (rust)");
   const splitScalars = split_16(scalarBuffer);
   console.timeEnd("scalar split (rust)");
@@ -81,6 +92,7 @@ import FIELD_MODULUS_WGSL from "./msm-wgpu/src/gpu/wgsl/field_modulus.wgsl";
 import CURVE_WGSL from "./msm-wgpu/src/gpu/wgsl/curve.wgsl";
 import PADD_IDX_WGSL from "./msm-wgpu/src/gpu/wgsl/entry_padd_idx.wgsl";
 import INTER_BUCKET_WGSL from "./msm-wgpu/src/gpu/wgsl/entry_inter_bucket.wgsl";
+import MONT_WGSL from "./msm-wgpu/src/gpu/wgsl/entry_mont.wgsl";
 
 // TODO: Detect this dynamically
 const maxVRAM = 128 * (1 << 20); // 128 MB
@@ -89,17 +101,14 @@ const windowSize = 16;
 const nBuckets = 1 << windowSize;
 const nWindows = Math.ceil(256 / windowSize);
 
-const nUint32PerPoint = 32;
-const nBytesPerPoint = nUint32PerPoint * 4;
+const nUint32PerScalar = 8;
+const nBytesPerScalar = 4 * nUint32PerScalar;
+const nUint32PerPoint = 4 * nUint32PerScalar;
+const nBytesPerPoint = 4 * nUint32PerPoint;
 
 let device: GPUDevice | undefined = undefined;
 
-async function gpuIntraBucketReduction(
-  points: Uint32Array,
-  splitScalars: Uint32Array
-): Promise<Uint32Array> {
-  const nPoints = points.length / nUint32PerPoint;
-
+async function initDevice(): Promise<GPUDevice> {
   if (device === undefined) {
     const adapter = await navigator.gpu.requestAdapter({
       powerPreference: gpuPowerPreference,
@@ -107,7 +116,16 @@ async function gpuIntraBucketReduction(
     if (!adapter) throw new Error("No adapter found");
     device = await adapter.requestDevice();
   }
+  return device;
+}
 
+async function gpuIntraBucketReduction(
+  points: Uint32Array,
+  splitScalars: Uint32Array
+): Promise<Uint32Array> {
+  const nPoints = points.length / nUint32PerPoint;
+
+  const device = await initDevice();
   const shader = device.createShaderModule({
     code: [U256_WGSL, FIELD_MODULUS_WGSL, CURVE_WGSL, PADD_IDX_WGSL].join("\n"),
   });
@@ -338,10 +356,8 @@ async function gpuIntraBucketReduction(
       fillInputStagingBuffer = undefined;
     }
     await outputStagingBuffer.mapAsync(GPUMapMode.READ);
-    results.set(
-      new Uint32Array(outputStagingBuffer.getMappedRange()),
-      w * nBuckets * nUint32PerPoint
-    );
+    const range = outputStagingBuffer.getMappedRange();
+    results.set(new Uint32Array(range), w * nBuckets * nUint32PerPoint);
     outputStagingBuffer.unmap();
   }
   outputStagingBuffer.destroy();
@@ -359,14 +375,7 @@ async function gpuInterBucketReduction(
 ): Promise<Uint32Array> {
   const nPoints = points.length / nUint32PerPoint;
   if (nPoints !== nBuckets * nWindows) throw new Error("Invalid input length");
-  if (device === undefined) {
-    console.log("requesting adapter");
-    const adapter = await navigator.gpu.requestAdapter({
-      powerPreference: gpuPowerPreference,
-    });
-    if (!adapter) throw new Error("No adapter found");
-    device = await adapter.requestDevice();
-  }
+  const device = await initDevice();
   const shader = device.createShaderModule({
     code: [U256_WGSL, FIELD_MODULUS_WGSL, CURVE_WGSL, INTER_BUCKET_WGSL].join(
       "\n"
@@ -537,6 +546,119 @@ async function gpuInterBucketReduction(
   return output;
 }
 
+/**
+ * Converts a Uint32Array of 256-bit scalars, encoded in big endian, to
+ * Montgomery form using the GPU.
+ * @param scalars The scalars to convert to Montgomery form.
+ * @returns The scalars in Montgomery form.
+ */
+async function gpuConvertMontgomery(
+  scalars: Uint32Array,
+  direction: "to" | "from"
+) {
+  const nScalars = scalars.length / nUint32PerScalar;
+  const device = await initDevice();
+
+  const shader = device.createShaderModule({
+    code: [U256_WGSL, FIELD_MODULUS_WGSL, CURVE_WGSL, MONT_WGSL].join("\n"),
+  });
+  const bindingTypes: GPUBufferBindingType[] = ["read-only-storage", "storage"];
+  const bindGroupLayout = device.createBindGroupLayout({
+    entries: bindingTypes.map((type: GPUBufferBindingType, index) => ({
+      binding: index,
+      visibility: GPUShaderStage.COMPUTE,
+      buffer: { type, hasDynamicOffset: false, minBindingSize: 0 },
+    })),
+  });
+  const pipelineLayout = device.createPipelineLayout({
+    bindGroupLayouts: [bindGroupLayout],
+  });
+  const pipeline = device.createComputePipeline({
+    layout: pipelineLayout,
+    compute: {
+      module: shader,
+      entryPoint: direction === "to" ? "to_mont" : "from_mont",
+    },
+  });
+
+  // VRAM usage:
+  // - 128 * batchSize for in/out buffers + input/output staging buffer
+  const maxBatchSize = Math.floor(maxVRAM / 128);
+  const batchSize = Math.min(
+    nScalars,
+    Math.max(1, Math.floor(maxBatchSize / nBuckets)) * nBuckets
+  );
+  const nBytesPerBatch = batchSize * nBytesPerScalar;
+  const inputBuffer = createBuffer(device, nBytesPerBatch, "input buffer");
+  const outputBuffer = createBuffer(device, nBytesPerBatch, "output buffer");
+  const outputStagingBuffer = createOutputStagingBuffer(
+    device,
+    nBytesPerBatch,
+    "output staging buffer"
+  );
+  const bindGroup = createBindGroup(device, pipeline, [
+    inputBuffer,
+    outputBuffer,
+  ]);
+  const inputStagingBuffer = device.createBuffer({
+    label: "input staging buffer",
+    size: nBytesPerBatch,
+    usage: GPUBufferUsage.MAP_WRITE | GPUBufferUsage.COPY_SRC,
+    mappedAtCreation: true,
+  });
+  new Uint32Array(inputStagingBuffer.getMappedRange()).set(
+    scalars.subarray(0, batchSize * nUint32PerScalar)
+  );
+  inputStagingBuffer.unmap();
+
+  let fillInputStagingBuffer: (() => Promise<void>) | undefined = undefined;
+
+  for (let batchStart = 0; batchStart < nScalars; batchStart += batchSize) {
+    const batchEnd = Math.min(batchStart + batchSize, nScalars);
+    const nScalarsInBatch = batchEnd - batchStart;
+    const nBytesInBatch = nScalarsInBatch * nBytesPerScalar;
+    if (fillInputStagingBuffer) await fillInputStagingBuffer();
+    const commandEncoder = device.createCommandEncoder();
+    // prettier-ignore
+    commandEncoder.copyBufferToBuffer(inputStagingBuffer, 0, inputBuffer, 0, nBytesInBatch);
+    const nWorkgroups = Math.ceil(nScalarsInBatch / 64);
+    {
+      const computePass = commandEncoder.beginComputePass();
+      computePass.setPipeline(pipeline);
+      computePass.setBindGroup(0, bindGroup);
+      computePass.dispatchWorkgroups(nWorkgroups, 1, 1);
+      computePass.end();
+    }
+    // prettier-ignore
+    commandEncoder.copyBufferToBuffer(outputBuffer, 0, outputStagingBuffer, 0, nBytesInBatch);
+    device.queue.submit([commandEncoder.finish()]);
+    if (batchEnd < nScalars) {
+      fillInputStagingBuffer = async () => {
+        const nextBatchStart = batchEnd;
+        const nextBatchEnd = Math.min(nextBatchStart + batchSize, nScalars);
+        await inputStagingBuffer.mapAsync(GPUMapMode.WRITE);
+        new Uint32Array(inputStagingBuffer.getMappedRange()).set(
+          scalars.subarray(
+            nextBatchStart * nUint32PerScalar,
+            nextBatchEnd * nUint32PerScalar
+          )
+        );
+        inputStagingBuffer.unmap();
+      };
+    } else {
+      fillInputStagingBuffer = undefined;
+    }
+    await outputStagingBuffer.mapAsync(GPUMapMode.READ, 0, nBytesInBatch);
+    const range = outputStagingBuffer.getMappedRange(0, nBytesInBatch);
+    scalars.set(new Uint32Array(range), batchStart * nUint32PerScalar);
+    outputStagingBuffer.unmap();
+  }
+  inputBuffer.destroy();
+  outputBuffer.destroy();
+  outputStagingBuffer.destroy();
+  inputStagingBuffer.destroy();
+}
+
 function createBuffer(
   device: GPUDevice,
   size: number,
@@ -579,3 +701,21 @@ function createBindGroup(
     })),
   });
 }
+
+const u32ArrayToBigInts = (u32Array: Uint32Array): bigint[] => {
+  const bigInts = [];
+  const chunkSize = 8;
+  const bitsPerElement = 32;
+
+  for (let i = 0; i < u32Array.length; i += chunkSize) {
+    let bigInt = BigInt(0);
+    for (let j = 0; j < chunkSize; j++) {
+      if (i + j >= u32Array.length) break; // Avoid out-of-bounds access
+      const u32 = BigInt(u32Array[i + j]);
+      bigInt |= u32 << (BigInt(chunkSize - 1 - j) * BigInt(bitsPerElement));
+    }
+    bigInts.push(bigInt);
+  }
+
+  return bigInts;
+};

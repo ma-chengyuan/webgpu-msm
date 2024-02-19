@@ -91,3 +91,28 @@ fn field_multiply_by_u32(a: ptr<function, Field>, c: u32) -> Field {
     }
     return accumulator;
 }
+
+// Montgomery R
+const R: u256 = u256(array<u32, 8>(223074866, 733715101, 383260021, 1361842158, 1918366991, 1879048178, 2099019775, 4294967283));
+// Montgomery R^2 mod N, used to convert from normal to Montgomery form
+const R_SQUARED: u256 = u256(array<u32, 8>(18864871, 4025600313, 2815164559, 3856434579, 3425445813, 2288015647, 634746810, 3093398907));
+// For use in Montgomery multiplication
+const N_PRIME: u256 = u256(array<u32, 8>(1771229434, 1756534102, 613901763, 1200660480, 1159862220, 2415919105, 168919039, 4294967295));
+
+fn field_redc(t_lo: ptr<function, u256>, t_hi: ptr<function, u256>, out: ptr<function, Field>) {
+    var p_lo: u256; var m: u256;
+    var n_prime = N_PRIME;
+    var n = ALEO_FIELD_ORDER;
+    u256_mul_lo(t_lo, &n_prime, &m); // p = (t mod 2^256) * n_prime
+    u256_mul(&m, &n, &p_lo, out); // p = m * n
+    u512_add_inplace(&p_lo, out, t_lo, t_hi); // p = p + t 
+    field_reduce_single(out);
+}
+
+fn field_multiply_mont(a: ptr<function, Field>, b: ptr<function, Field>) -> Field {
+    var t_lo: u256; var t_hi: u256;
+    u256_mul(a, b, &t_lo, &t_hi);
+    var out: Field;
+    field_redc(&t_lo, &t_hi, &out);
+    return out;
+}

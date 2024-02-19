@@ -415,3 +415,73 @@ fn u256_double_in_place(a: ptr<function, u256>) {
     (*a).components[0] = total + carry;
     carry = u32(total < single);
 }
+
+fn u256_mul(a: ptr<function, u256>, b: ptr<function, u256>, lo: ptr<function, u256>, hi: ptr<function, u256>) {
+    var temp: array<u32, 32>;
+    for (var i = 15; i >= 0; i--) {
+        var a_digit = (*a).components[i >> 1u];
+        a_digit = select(a_digit & 0xffffu, a_digit >> 16u, (i & 1) == 0);
+        for (var j = 15; j >= 0; j--) {
+            var b_digit = (*b).components[j >> 1u];
+            b_digit = select(b_digit & 0xffffu, b_digit >> 16u, (j & 1) == 0);
+            let prod = a_digit * b_digit;
+            temp[i + j + 1] += prod & 0xffffu;
+            temp[i + j] += prod >> 16u;
+        }
+    }
+    var carry = 0u;
+    for (var i = 31; i >= 0; i--) {
+        temp[i] += carry;
+        carry = temp[i] >> 16u;
+        temp[i] &= 0xffffu;
+    }
+    for (var i = 15; i >= 8; i--) {
+        (*lo).components[i - 8] = temp[(i << 1u) + 1] | (temp[i << 1u] << 16u);
+    }
+    for (var i = 7; i >= 0; i--) {
+        (*hi).components[i] = temp[(i << 1u) + 1] | (temp[i << 1u] << 16u);
+    }
+}
+
+fn u256_mul_lo(a: ptr<function, u256>, b: ptr<function, u256>, lo: ptr<function, u256>) {
+    var temp: array<u32, 16>;
+    for (var i = 15; i >= 0; i--) {
+        var a_digit = (*a).components[i >> 1u];
+        a_digit = select(a_digit & 0xffffu, a_digit >> 16u, (i & 1) == 0);
+        for (var j = 15; j >= 15 - i; j--) {
+            var b_digit = (*b).components[j >> 1u];
+            b_digit = select(b_digit & 0xffffu, b_digit >> 16u, (j & 1) == 0);
+            let prod = a_digit * b_digit;
+            temp[i + j - 15] += prod & 0xffffu;
+            if i + j >= 16 { temp[i + j - 16] += prod >> 16u; }
+        }
+    }
+    var carry = 0u;
+    for (var i = 15; i >= 0; i--) {
+        temp[i] += carry;
+        carry = temp[i] >> 16u;
+        temp[i] &= 0xffffu;
+    }
+    for (var i = 7; i >= 0; i--) {
+        (*lo).components[i] = temp[(i << 1u) + 1] | (temp[i << 1u] << 16u);
+    }
+}
+
+fn u512_add_inplace(
+    a_lo: ptr<function, u256>, a_hi: ptr<function, u256>,
+    b_lo: ptr<function, u256>, b_hi: ptr<function, u256>
+) {
+    var carry = 0u;
+    for (var i = 7; i >= 0; i--) {
+        let a_component = (*a_lo).components[i];
+        var sum = a_component + (*b_lo).components[i] + carry;
+        (*a_lo).components[i] = sum;
+        carry = u32(sum < a_component || (sum - carry) < a_component);
+    }
+    for (var i = 7; i >= 0; i--) {
+        let a_component = (*a_hi).components[i];
+        var sum = a_component + (*b_hi).components[i] + carry;
+        (*a_hi).components[i] = sum;
+        carry = u32(sum < a_component || (sum - carry) < a_component);
+    }
+}
