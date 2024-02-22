@@ -1,8 +1,8 @@
-# msm-split
+# msm-macro
 
-This crate provides proc macros used in `msm-wgpu`. In particular, it provides
+This crate provides proc macros used in `msm-wasm`. In particular, it provides
 macro to generate code that splits a big integer into smaller ones, as required
-by the Pippenger algorithm. See `../msm-wgpu/src/split.rs` for its application.
+by the Pippenger algorithm. See `../msm-wasm/src/split.rs` for its application.
 
 E.g.,
 

@@ -1,4 +1,4 @@
-use msm_split::define_msm_scalar_splitter;
+use msm_macro::define_msm_scalar_splitter;
 
 /// Trait for splitting a multi-limb big scalar into smaller limbs of at most
 /// WINDOW_SIZE bits each.

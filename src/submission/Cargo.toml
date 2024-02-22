@@ -1,3 +1,3 @@
 [workspace]
 resolver = "2"
-members = ["msm-wgpu", "msm-split", "msm-bin"]
+members = ["msm-wasm", "msm-macro"]

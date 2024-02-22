@@ -8,7 +8,6 @@ onmessage = (event) => {
    */
   const data = event.data;
   const points = data.points;
-  console.timeStamp("data received");
   const pointBuffer = new Uint32Array(points.length * 32);
   const scalars = data.scalars;
   const scalarBuffer = new Uint32Array(scalars.length * 8);

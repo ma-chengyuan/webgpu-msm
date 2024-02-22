@@ -5,7 +5,7 @@ import init, {
   inter_bucket_reduce_16,
   inter_bucket_reduce_last,
   initThreadPool,
-} from "./msm-wgpu/pkg/msm_wgpu.js";
+} from "./msm-wasm/pkg/msm_wasm.js";
 
 let initialized = false;
 
@@ -17,49 +17,35 @@ export const compute_msm = async (
 ): Promise<{ x: bigint; y: bigint }> => {
   const pointBuffer = new Uint32Array(baseAffinePoints.length * 32);
   const scalarBuffer = new Uint32Array(scalars.length * 8);
-
   console.time("convert points");
-  if (scalars.length > 0 && typeof scalars[0] === "bigint") {
-    // Convert BigInts to Uint32Arrays
-    // At some point the cost of inter-worker communication will outweigh the
-    // benefits of parallelism.
-    const concurrency = Math.min(8, navigator.hardwareConcurrency);
-    const chunkSize = Math.ceil(baseAffinePoints.length / concurrency);
-    const promises = [];
-    for (let i = 0; i < concurrency; i++) {
-      const pointsChunk = baseAffinePoints.slice(
-        i * chunkSize,
-        (i + 1) * chunkSize
-      );
-      const scalarsChunk = scalars.slice(i * chunkSize, (i + 1) * chunkSize);
-      const worker = new Worker(new URL("worker_convert.js", import.meta.url));
-      let resolvePromise: (_: void) => void;
-      promises.push(new Promise<void>((resolve) => (resolvePromise = resolve)));
-      worker.onmessage = (e) => {
-        pointBuffer.set(e.data.pointBuffer, i * chunkSize * 32);
-        scalarBuffer.set(e.data.scalarBuffer, i * chunkSize * 8);
-        console.timeStamp(`end worker ${i}`);
-        resolvePromise();
-      };
-      console.timeStamp(`start worker ${i}`);
-      worker.postMessage({
-        points: pointsChunk,
-        scalars: scalarsChunk,
-      });
-    }
-    await Promise.all(promises);
-  } else {
-    // Convert U32ArrayPoints to Uint32Arrays
-    scalars = scalars as Uint32Array[];
-    baseAffinePoints = baseAffinePoints as U32ArrayPoint[];
-    for (let i = 0; i < scalars.length; i++) {
-      scalarBuffer.set(scalars[i], i * 8);
-      pointBuffer.set(baseAffinePoints[i].x, i * 32);
-      pointBuffer.set(baseAffinePoints[i].y, i * 32 + 8);
-      pointBuffer.set(baseAffinePoints[i].t, i * 32 + 16);
-      pointBuffer.set(baseAffinePoints[i].z, i * 32 + 32);
-    }
+  // Convert BigInts to Uint32Arrays
+  // At some point the cost of inter-worker communication will outweigh the
+  // benefits of parallelism.
+  const concurrency = Math.min(8, navigator.hardwareConcurrency);
+  const chunkSize = Math.ceil(baseAffinePoints.length / concurrency);
+  const promises = [];
+  for (let i = 0; i < concurrency; i++) {
+    const pointsChunk = baseAffinePoints.slice(
+      i * chunkSize,
+      (i + 1) * chunkSize
+    );
+    const scalarsChunk = scalars.slice(i * chunkSize, (i + 1) * chunkSize);
+    const worker = new Worker(new URL("worker_convert.js", import.meta.url));
+    let resolvePromise: (_: void) => void;
+    promises.push(new Promise<void>((resolve) => (resolvePromise = resolve)));
+    worker.onmessage = (e) => {
+      pointBuffer.set(e.data.pointBuffer, i * chunkSize * 32);
+      scalarBuffer.set(e.data.scalarBuffer, i * chunkSize * 8);
+      console.timeStamp(`end worker ${i}`);
+      resolvePromise();
+    };
+    console.timeStamp(`start worker ${i}`);
+    worker.postMessage({
+      points: pointsChunk,
+      scalars: scalarsChunk,
+    });
   }
+  await Promise.all(promises);
   console.timeEnd("convert points");
   if (!initialized) {
     await init();
@@ -87,12 +73,12 @@ export const compute_msm = async (
   return { x: resultBigInts[0], y: resultBigInts[1] };
 };
 
-import U256_WGSL from "./msm-wgpu/src/gpu/wgsl/u256.wgsl";
-import FIELD_MODULUS_WGSL from "./msm-wgpu/src/gpu/wgsl/field_modulus.wgsl";
-import CURVE_WGSL from "./msm-wgpu/src/gpu/wgsl/curve.wgsl";
-import PADD_IDX_WGSL from "./msm-wgpu/src/gpu/wgsl/entry_padd_idx.wgsl";
-import INTER_BUCKET_WGSL from "./msm-wgpu/src/gpu/wgsl/entry_inter_bucket.wgsl";
-import MONT_WGSL from "./msm-wgpu/src/gpu/wgsl/entry_mont.wgsl";
+import U256_WGSL from "./wgsl/u256.wgsl";
+import FIELD_MODULUS_WGSL from "./wgsl/field_modulus.wgsl";
+import CURVE_WGSL from "./wgsl/curve.wgsl";
+import PADD_IDX_WGSL from "./wgsl/entry_padd_idx.wgsl";
+import INTER_BUCKET_WGSL from "./wgsl/entry_inter_bucket.wgsl";
+import MONT_WGSL from "./wgsl/entry_mont.wgsl";
 
 // TODO: Detect this dynamically
 const maxVRAM = 128 * (1 << 20); // 128 MB
