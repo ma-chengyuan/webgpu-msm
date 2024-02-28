@@ -3,7 +3,8 @@ import { BigIntPoint, U32ArrayPoint } from "../reference/types";
 import init, {
   split_16,
   inter_bucket_reduce_16,
-  inter_bucket_reduce_last,
+  inter_bucket_reduce_last_16,
+  msm_end_to_end_16,
   initThreadPool,
 } from "./msm-wasm/pkg/msm_wasm.js";
 
@@ -52,22 +53,32 @@ export const compute_msm = async (
     await initThreadPool(navigator.hardwareConcurrency);
     initialized = true;
   }
-  console.time("scalar split (rust)");
-  const splitScalars = split_16(scalarBuffer);
-  console.timeEnd("scalar split (rust)");
-  console.time("intra bucket reduction (gpu)");
-  const reduced = await gpuIntraBucketReduction(pointBuffer, splitScalars);
-  console.timeEnd("intra bucket reduction (gpu)");
-  const useRustForReduction = true;
+
+  const pureWasm = false;
   let result: Uint32Array;
-  if (useRustForReduction) {
-    console.time("inter bucket reduction (rust)");
-    result = inter_bucket_reduce_16(reduced);
-    console.timeEnd("inter bucket reduction (rust)");
+  if (pureWasm) {
+    console.time("end to end rust msm (gpu)");
+    result = msm_end_to_end_16(scalarBuffer, pointBuffer);
+    console.timeEnd("end to end rust msm (gpu)");
   } else {
-    console.time("inter bucket reduction (gpu)");
-    result = inter_bucket_reduce_last(await gpuInterBucketReduction(reduced));
-    console.timeEnd("inter bucket reduction (gpu)");
+    console.time("scalar split (rust)");
+    const splitScalars = split_16(scalarBuffer);
+    console.timeEnd("scalar split (rust)");
+    console.time("intra bucket reduction (gpu)");
+    const reduced = await gpuIntraBucketReduction(pointBuffer, splitScalars);
+    console.timeEnd("intra bucket reduction (gpu)");
+    const useRustForReduction = true;
+    if (useRustForReduction) {
+      console.time("inter bucket reduction (rust)");
+      result = inter_bucket_reduce_16(reduced);
+      console.timeEnd("inter bucket reduction (rust)");
+    } else {
+      console.time("inter bucket reduction (gpu)");
+      result = inter_bucket_reduce_last_16(
+        await gpuInterBucketReduction(reduced)
+      );
+      console.timeEnd("inter bucket reduction (gpu)");
+    }
   }
   const resultBigInts = u32ArrayToBigInts(result);
   return { x: resultBigInts[0], y: resultBigInts[1] };

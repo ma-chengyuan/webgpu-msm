@@ -38,6 +38,11 @@ const config = {
         test: /\.wgsl/,
         type: "asset/source",
       },
+      {
+        test: /\.css$/i,
+        exclude: /node_modules/,
+        use: ["style-loader", "css-loader", "postcss-loader"],
+      },
     ],
   },
   resolve: {
@@ -50,7 +55,7 @@ const config = {
   },
   plugins: [
     new HtmlWebpackPlugin({
-      template: "src/index.html",
+      template: "public/index.html",
     }),
     new ForkTsCheckerWebpackPlugin({
       async: false,

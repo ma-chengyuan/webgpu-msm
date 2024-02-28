@@ -9,6 +9,7 @@ use std::convert::TryInto;
 use ark_ec::{CurveGroup, Group};
 use ark_ed_on_bls12_377::EdwardsProjective;
 use ark_ff::Zero;
+use paste::paste;
 use rayon::iter::ParallelIterator;
 
 use crate::bytes::{read_points, write_fq};
@@ -80,14 +81,7 @@ pub fn split_16(scalars_flat: &[u32]) -> Vec<u32> {
 
 use rayon::prelude::ParallelSlice;
 
-#[wasm_bindgen]
-pub fn inter_bucket_reduce_16(raw_buckets: &[u32]) -> Vec<u32> {
-    type Splitter = Split16;
-    let chunk_size = raw_buckets.len() / Splitter::N_WINDOWS;
-    let bucket_sums = raw_buckets
-        .par_chunks(chunk_size)
-        .map(|chunk| bucket_sum_cpu(read_points(chunk)))
-        .collect::<Vec<_>>();
+fn reduce_last<Splitter: SplitterConstants>(bucket_sums: Vec<EdwardsProjective>) -> Vec<u32> {
     let mut sum = EdwardsProjective::zero();
     for bucket_sum in bucket_sums {
         for _ in 0..Splitter::WINDOW_SIZE {
@@ -102,23 +96,56 @@ pub fn inter_bucket_reduce_16(raw_buckets: &[u32]) -> Vec<u32> {
     result_buf
 }
 
-#[wasm_bindgen]
-pub fn inter_bucket_reduce_last(raw_buckets: &[u32]) -> Vec<u32> {
-    type Splitter = Split16;
-    let bucket_sums = read_points(raw_buckets);
-    let mut sum = EdwardsProjective::zero();
-    for bucket_sum in bucket_sums {
-        for _ in 0..Splitter::WINDOW_SIZE {
-            sum.double_in_place();
-        }
-        sum += bucket_sum;
-    }
-    let result_affine = sum.into_affine();
-    let mut result_buf = vec![0u32; 16];
-    write_fq(&mut result_buf[0..8], &result_affine.x);
-    write_fq(&mut result_buf[8..16], &result_affine.y);
-    result_buf
+fn msm_end_to_end<Splitter: SplitterConstants>(
+    scalars_flat: &[u32],
+    points_flat: &[u32],
+) -> Vec<u32> {
+    let split = split_16(scalars_flat);
+    let chunk_size = split.len() / Splitter::N_WINDOWS;
+    let points = read_points(points_flat);
+    let n_buckets = 1 << Splitter::WINDOW_SIZE;
+    let bucket_sums = split
+        .par_chunks(chunk_size)
+        .map(|chunk| bucket_sum_cpu(bucket_cpu(chunk, &points, n_buckets)))
+        .collect::<Vec<_>>();
+    reduce_last::<Splitter>(bucket_sums)
 }
+
+fn inter_bucket_reduce<Splitter: SplitterConstants>(raw_buckets: &[u32]) -> Vec<u32> {
+    let chunk_size = raw_buckets.len() / Splitter::N_WINDOWS;
+    let bucket_sums = raw_buckets
+        .par_chunks(chunk_size)
+        .map(|chunk| bucket_sum_cpu(read_points(chunk)))
+        .collect::<Vec<_>>();
+    reduce_last::<Splitter>(bucket_sums)
+}
+
+fn inter_bucket_reduce_last<Splitter: SplitterConstants>(raw_buckets: &[u32]) -> Vec<u32> {
+    reduce_last::<Splitter>(read_points(raw_buckets))
+}
+
+macro_rules! define_msm_functions {
+    ($w:expr) => {
+        paste! {
+            #[wasm_bindgen]
+            pub fn [<msm_end_to_end_ $w>](scalars_flat: &[u32], points_flat: &[u32]) -> Vec<u32> {
+                msm_end_to_end::<[<Split $w>]>(scalars_flat, points_flat)
+            }
+
+            #[wasm_bindgen]
+            pub fn [<inter_bucket_reduce_ $w>](raw_buckets: &[u32]) -> Vec<u32> {
+                inter_bucket_reduce::<[<Split $w>]>(raw_buckets)
+            }
+
+            #[wasm_bindgen]
+            pub fn [<inter_bucket_reduce_last_ $w>](raw_buckets: &[u32]) -> Vec<u32> {
+                inter_bucket_reduce_last::<[<Split $w>]>(raw_buckets)
+            }
+        }
+    };
+}
+
+define_msm_functions!(16);
 
 // WASM bindings
 
