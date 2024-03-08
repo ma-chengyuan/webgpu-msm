@@ -163,14 +163,12 @@ pub fn define_msm_scalar_splitter(input: TokenStream) -> TokenStream {
     let expanded = quote! {
         pub(crate) struct #name;
 
-        impl SplitterConstants for #name {
+        impl SplitImpl for #name {
             const WINDOW_SIZE: usize = (#window_size) as usize;
             const N_WINDOWS: usize = #n_windows;
             type Output = #output_type;
-        }
 
-        impl #name {
-            pub const fn split(#input_tok: &[#input_type; #input_size]) -> [#output_type; #n_windows] {
+            fn split(#input_tok: &[#input_type; #input_size]) -> [#output_type; #n_windows] {
                 [ #body ]
             }
         }

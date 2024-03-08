@@ -1,16 +1,21 @@
 import { BigIntPoint, U32ArrayPoint } from "../reference/types";
 
 import init, {
-  split_16,
-  inter_bucket_reduce_16,
-  inter_bucket_reduce_last_16,
-  msm_end_to_end_16,
+  split_dynamic,
+  inter_bucket_reduce_dynamic,
+  inter_bucket_reduce_last_dynamic,
+  msm_end_to_end_dynamic,
   initThreadPool,
 } from "./msm-wasm/pkg/msm_wasm.js";
 
 let initialized = false;
 
 const gpuPowerPreference: GPUPowerPreference = "high-performance";
+const windowSize = parseInt(
+  new URLSearchParams(location.search).get("window_size") || "13"
+);
+const nBuckets = 1 << windowSize;
+const nWindows = Math.ceil(256 / windowSize);
 
 export const compute_msm = async (
   baseAffinePoints: BigIntPoint[] | U32ArrayPoint[],
@@ -20,33 +25,52 @@ export const compute_msm = async (
   const scalarBuffer = new Uint32Array(scalars.length * 8);
   console.time("convert points");
   // Convert BigInts to Uint32Arrays
-  // At some point the cost of inter-worker communication will outweigh the
-  // benefits of parallelism.
-  const concurrency = Math.min(8, navigator.hardwareConcurrency);
-  const chunkSize = Math.ceil(baseAffinePoints.length / concurrency);
-  const promises = [];
-  for (let i = 0; i < concurrency; i++) {
-    const pointsChunk = baseAffinePoints.slice(
-      i * chunkSize,
-      (i + 1) * chunkSize
-    );
-    const scalarsChunk = scalars.slice(i * chunkSize, (i + 1) * chunkSize);
-    const worker = new Worker(new URL("worker_convert.js", import.meta.url));
-    let resolvePromise: (_: void) => void;
-    promises.push(new Promise<void>((resolve) => (resolvePromise = resolve)));
-    worker.onmessage = (e) => {
-      pointBuffer.set(e.data.pointBuffer, i * chunkSize * 32);
-      scalarBuffer.set(e.data.scalarBuffer, i * chunkSize * 8);
-      console.timeStamp(`end worker ${i}`);
-      resolvePromise();
-    };
-    console.timeStamp(`start worker ${i}`);
-    worker.postMessage({
-      points: pointsChunk,
-      scalars: scalarsChunk,
-    });
+
+  const hasBigInt =
+    (baseAffinePoints.length > 0 &&
+      typeof baseAffinePoints[0].x === "bigint") ||
+    (scalars.length > 0 && typeof scalars[0] === "bigint");
+  if (hasBigInt) {
+    // At some point the cost of inter-worker communication will outweigh the
+    // benefits of parallelism. 8 seems to be a good number for now.
+    const concurrency = Math.min(8, navigator.hardwareConcurrency);
+    const chunkSize = Math.ceil(baseAffinePoints.length / concurrency);
+    const promises = [];
+    for (let i = 0; i < concurrency; i++) {
+      const pointsChunk = baseAffinePoints.slice(
+        i * chunkSize,
+        (i + 1) * chunkSize
+      );
+      const scalarsChunk = scalars.slice(i * chunkSize, (i + 1) * chunkSize);
+      const worker = new Worker(new URL("worker_convert.js", import.meta.url));
+      let resolvePromise: (_: void) => void;
+      promises.push(new Promise<void>((resolve) => (resolvePromise = resolve)));
+      worker.onmessage = (e) => {
+        pointBuffer.set(e.data.pointBuffer, i * chunkSize * 32);
+        scalarBuffer.set(e.data.scalarBuffer, i * chunkSize * 8);
+        console.timeStamp(`end worker ${i}`);
+        resolvePromise();
+      };
+      console.timeStamp(`start worker ${i}`);
+      worker.postMessage({
+        points: pointsChunk,
+        scalars: scalarsChunk,
+      });
+    }
+    await Promise.all(promises);
+  } else {
+    for (let i = 0; i < baseAffinePoints.length; i++) {
+      const p = baseAffinePoints[i] as U32ArrayPoint;
+      pointBuffer.set(p.x, i * 32);
+      pointBuffer.set(p.y, i * 32 + 8);
+      pointBuffer.set(p.t, i * 32 + 16);
+      pointBuffer.set(p.z, i * 32 + 24);
+    }
+    for (let i = 0; i < scalars.length; i++) {
+      scalarBuffer.set(scalars[i] as Uint32Array, i * 8);
+    }
   }
-  await Promise.all(promises);
+
   console.timeEnd("convert points");
   if (!initialized) {
     await init();
@@ -54,27 +78,30 @@ export const compute_msm = async (
     initialized = true;
   }
 
-  const pureWasm = false;
+  const pureWasm = new URLSearchParams(location.search).has("cpu");
   let result: Uint32Array;
   if (pureWasm) {
     console.time("end to end rust msm (gpu)");
-    result = msm_end_to_end_16(scalarBuffer, pointBuffer);
+    result = msm_end_to_end_dynamic(windowSize, scalarBuffer, pointBuffer);
     console.timeEnd("end to end rust msm (gpu)");
   } else {
     console.time("scalar split (rust)");
-    const splitScalars = split_16(scalarBuffer);
+    const splitScalars = split_dynamic(windowSize, scalarBuffer);
     console.timeEnd("scalar split (rust)");
     console.time("intra bucket reduction (gpu)");
     const reduced = await gpuIntraBucketReduction(pointBuffer, splitScalars);
     console.timeEnd("intra bucket reduction (gpu)");
-    const useRustForReduction = true;
+    const useRustForReduction = !new URLSearchParams(location.search).has(
+      "gpu_inter_bucket"
+    );
     if (useRustForReduction) {
       console.time("inter bucket reduction (rust)");
-      result = inter_bucket_reduce_16(reduced);
+      result = inter_bucket_reduce_dynamic(windowSize, reduced);
       console.timeEnd("inter bucket reduction (rust)");
     } else {
       console.time("inter bucket reduction (gpu)");
-      result = inter_bucket_reduce_last_16(
+      result = inter_bucket_reduce_last_dynamic(
+        windowSize,
         await gpuInterBucketReduction(reduced)
       );
       console.timeEnd("inter bucket reduction (gpu)");
@@ -93,10 +120,6 @@ import MONT_WGSL from "./wgsl/entry_mont.wgsl";
 
 // TODO: Detect this dynamically
 const maxVRAM = 128 * (1 << 20); // 128 MB
-
-const windowSize = 16;
-const nBuckets = 1 << windowSize;
-const nWindows = Math.ceil(256 / windowSize);
 
 const nUint32PerScalar = 8;
 const nBytesPerScalar = 4 * nUint32PerScalar;
@@ -367,6 +390,14 @@ async function gpuIntraBucketReduction(
   return results;
 }
 
+/**
+ * Performs the inter-bucket reduction step of the MSM algorithm on the GPU.
+ * This is slower than the CPU implementation, and may suffer instability due to
+ * binding group exhaustion. Definitely use with caution.
+ *
+ * @param points The flattened array of points to reduce.
+ * @returns The reduced points.
+ */
 async function gpuInterBucketReduction(
   points: Uint32Array
 ): Promise<Uint32Array> {

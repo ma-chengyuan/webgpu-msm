@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+#![allow(incomplete_features)]
+#![feature(generic_const_exprs)]
 
 mod bytes;
 mod split;
@@ -14,7 +16,7 @@ use rayon::iter::ParallelIterator;
 
 use crate::bytes::{read_points, write_fq};
 #[allow(unused_imports)]
-use crate::split::{Split12, Split16, Split20, SplitterConstants};
+use crate::split::*;
 use wasm_bindgen::prelude::*;
 
 static INIT: std::sync::Once = std::sync::Once::new();
@@ -53,10 +55,12 @@ fn bucket_sum_cpu(bucket: Vec<EdwardsProjective>) -> EdwardsProjective {
     sum
 }
 
-#[wasm_bindgen]
-pub fn split_16(scalars_flat: &[u32]) -> Vec<u32> {
-    type Splitter = Split16;
-
+pub fn split<Split>(scalars_flat: &[u32]) -> Vec<u32>
+where
+    Split: SplitImpl,
+    Split::Output: Into<u32> + Copy,
+    [(); Split::N_WINDOWS]: Sized,
+{
     INIT.call_once(|| {
         console_log::init_with_level(log::Level::Info).unwrap();
     });
@@ -64,16 +68,16 @@ pub fn split_16(scalars_flat: &[u32]) -> Vec<u32> {
 
     debug_assert_eq!(scalars_flat.len() % 8, 0);
     let n_points = scalars_flat.len() / 8;
-    let mut result = vec![0u32; n_points * Splitter::N_WINDOWS];
+    let mut result = vec![0u32; n_points * Split::N_WINDOWS];
     for i in 0..n_points {
         let slice: &[u32; 8] = unsafe {
             (&scalars_flat[8 * i..8 * i + 8])
                 .try_into()
                 .unwrap_unchecked()
         };
-        let splitted_scalars = Splitter::split(slice);
+        let splitted_scalars = Split::split(slice);
         for (j, splitted_scalar) in splitted_scalars.iter().enumerate() {
-            result[j * n_points + i] = *splitted_scalar;
+            result[j * n_points + i] = (*splitted_scalar).into();
         }
     }
     result
@@ -81,10 +85,13 @@ pub fn split_16(scalars_flat: &[u32]) -> Vec<u32> {
 
 use rayon::prelude::ParallelSlice;
 
-fn reduce_last<Splitter: SplitterConstants>(bucket_sums: Vec<EdwardsProjective>) -> Vec<u32> {
+fn reduce_last<Split>(bucket_sums: Vec<EdwardsProjective>) -> Vec<u32>
+where
+    Split: SplitImpl,
+{
     let mut sum = EdwardsProjective::zero();
     for bucket_sum in bucket_sums {
-        for _ in 0..Splitter::WINDOW_SIZE {
+        for _ in 0..Split::WINDOW_SIZE {
             sum.double_in_place();
         }
         sum += bucket_sum;
@@ -96,37 +103,50 @@ fn reduce_last<Splitter: SplitterConstants>(bucket_sums: Vec<EdwardsProjective>)
     result_buf
 }
 
-fn msm_end_to_end<Splitter: SplitterConstants>(
-    scalars_flat: &[u32],
-    points_flat: &[u32],
-) -> Vec<u32> {
-    let split = split_16(scalars_flat);
-    let chunk_size = split.len() / Splitter::N_WINDOWS;
+fn msm_end_to_end<Split>(scalars_flat: &[u32], points_flat: &[u32]) -> Vec<u32>
+where
+    Split: SplitImpl,
+    Split::Output: Into<u32> + Copy,
+    [(); Split::N_WINDOWS]: Sized,
+{
+    let split = split::<Split>(scalars_flat);
+    let chunk_size = split.len() / Split::N_WINDOWS;
     let points = read_points(points_flat);
-    let n_buckets = 1 << Splitter::WINDOW_SIZE;
+    let n_buckets = 1 << Split::WINDOW_SIZE;
     let bucket_sums = split
         .par_chunks(chunk_size)
         .map(|chunk| bucket_sum_cpu(bucket_cpu(chunk, &points, n_buckets)))
         .collect::<Vec<_>>();
-    reduce_last::<Splitter>(bucket_sums)
+    reduce_last::<Split>(bucket_sums)
 }
 
-fn inter_bucket_reduce<Splitter: SplitterConstants>(raw_buckets: &[u32]) -> Vec<u32> {
-    let chunk_size = raw_buckets.len() / Splitter::N_WINDOWS;
+fn inter_bucket_reduce<Split>(raw_buckets: &[u32]) -> Vec<u32>
+where
+    Split: SplitImpl,
+{
+    let chunk_size = raw_buckets.len() / Split::N_WINDOWS;
     let bucket_sums = raw_buckets
         .par_chunks(chunk_size)
         .map(|chunk| bucket_sum_cpu(read_points(chunk)))
         .collect::<Vec<_>>();
-    reduce_last::<Splitter>(bucket_sums)
+    reduce_last::<Split>(bucket_sums)
 }
 
-fn inter_bucket_reduce_last<Splitter: SplitterConstants>(raw_buckets: &[u32]) -> Vec<u32> {
-    reduce_last::<Splitter>(read_points(raw_buckets))
+fn inter_bucket_reduce_last<Split>(raw_buckets: &[u32]) -> Vec<u32>
+where
+    Split: SplitImpl,
+{
+    reduce_last::<Split>(read_points(raw_buckets))
 }
 
 macro_rules! define_msm_functions {
-    ($w:expr) => {
-        paste! {
+    ($($w:expr),*) => {
+        $(paste! {
+            #[wasm_bindgen]
+            pub fn [<split_ $w>](scalars_flat: &[u32]) -> Vec<u32> {
+                split::<[<Split $w>]>(scalars_flat)
+            }
+
             #[wasm_bindgen]
             pub fn [<msm_end_to_end_ $w>](scalars_flat: &[u32], points_flat: &[u32]) -> Vec<u32> {
                 msm_end_to_end::<[<Split $w>]>(scalars_flat, points_flat)
@@ -141,11 +161,45 @@ macro_rules! define_msm_functions {
             pub fn [<inter_bucket_reduce_last_ $w>](raw_buckets: &[u32]) -> Vec<u32> {
                 inter_bucket_reduce_last::<[<Split $w>]>(raw_buckets)
             }
+        })*
+
+        paste!{
+            #[wasm_bindgen]
+            pub fn split_dynamic(window_size: u32, scalars_flat: &[u32]) -> Vec<u32> {
+                match window_size {
+                    $( $w => split::<[<Split $w>]>(scalars_flat), )*
+                    _ => panic!("Unsupported window size: {}", window_size),
+                }
+            }
+
+            #[wasm_bindgen]
+            pub fn msm_end_to_end_dynamic(window_size: u32, scalars_flat: &[u32], points_flat: &[u32]) -> Vec<u32> {
+                match window_size {
+                    $( $w => msm_end_to_end::<[<Split $w>]>(scalars_flat, points_flat), )*
+                    _ => panic!("Unsupported window size: {}", window_size),
+                }
+            }
+
+            #[wasm_bindgen]
+            pub fn inter_bucket_reduce_dynamic(window_size: u32, raw_buckets: &[u32]) -> Vec<u32> {
+                match window_size {
+                    $( $w => inter_bucket_reduce::<[<Split $w>]>(raw_buckets), )*
+                    _ => panic!("Unsupported window size: {}", window_size),
+                }
+            }
+
+            #[wasm_bindgen]
+            pub fn inter_bucket_reduce_last_dynamic(window_size: u32, raw_buckets: &[u32]) -> Vec<u32> {
+                match window_size {
+                    $( $w => inter_bucket_reduce_last::<[<Split $w>]>(raw_buckets), )*
+                    _ => panic!("Unsupported window size: {}", window_size),
+                }
+            }
         }
     };
 }
 
-define_msm_functions!(16);
+define_msm_functions!(8, 9, 10, 11, 12, 13, 14, 15, 16, 20);
 
 // WASM bindings
 
