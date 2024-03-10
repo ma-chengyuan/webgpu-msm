@@ -205,7 +205,7 @@ async function gpuIntraBucketReduction(
   const batchSize =
     nPoints <= maxBatchSize
       ? nPoints
-      : nPoints / Math.ceil(nPoints / maxBatchSize);
+      : Math.ceil(nPoints / Math.ceil(nPoints / maxBatchSize));
   // The buffer to pass indices to the PADD kernel.
   // Each set of indices is 3 u32s: [input1, input2, output], so 12 bytes.
   // Max # of index sets is sum_{bucket} ceil(# of points in bucket / 2)
