@@ -8,6 +8,11 @@ import init, {
   initThreadPool,
 } from "./msm-wasm/pkg/msm_wasm.js";
 
+import aleoInit, {
+  initThreadPool as aleoInitThreadPool,
+  msm as aleoMsm,
+} from "./aleo-wasm-baseline/pkg/aleo_wasm_baseline.js";
+
 let initialized = false;
 
 const gpuPowerPreference: GPUPowerPreference = "high-performance";
@@ -72,6 +77,17 @@ export const compute_msm = async (
   }
 
   console.timeEnd("convert points");
+  if (new URLSearchParams(location.search).has("aleo")) {
+    if (!initialized) {
+      await aleoInit();
+      await aleoInitThreadPool(navigator.hardwareConcurrency);
+      initialized = true;
+    }
+    const result = aleoMsm(scalarBuffer, pointBuffer);
+    const resultBigInts = u32ArrayToBigInts(result);
+    return { x: resultBigInts[0], y: resultBigInts[1] };
+  }
+
   if (!initialized) {
     await init();
     await initThreadPool(navigator.hardwareConcurrency);
@@ -99,6 +115,7 @@ export const compute_msm = async (
       result = inter_bucket_reduce_dynamic(windowSize, reduced);
       console.timeEnd("inter bucket reduction (rust)");
     } else {
+      // Not really used now.
       console.time("inter bucket reduction (gpu)");
       result = inter_bucket_reduce_last_dynamic(
         windowSize,

@@ -77,6 +77,7 @@ const config = {
       "Cross-Origin-Embedder-Policy": "require-corp",
       "Cross-Origin-Opener-Policy": "same-origin",
     },
+    allowedHosts: "all",
     static: path.join(__dirname, "build"),
     historyApiFallback: true,
     port: 4040,
