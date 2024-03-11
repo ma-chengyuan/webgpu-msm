@@ -1,12 +1,12 @@
-/**
- * @typedef {{ x: Uint32Array, y: Uint32Array, t: Uint32Array, z: Uint32Array }} U32ArrayPoint
- * @typedef {{ x: BigInt, y: BigInt, t: BigInt, z: BigInt }} BigIntPoint
- */
+import type { BigIntPoint, U32ArrayPoint } from "../reference/types";
+
+type Data = {
+  points: BigIntPoint[] | U32ArrayPoint[];
+  scalars: bigint[] | Uint32Array[];
+};
+
 onmessage = (event) => {
-  /**
-   * @type {{ points: BigIntPoint[] | U32ArrayPoint[], scalars: BigInt[] | Uint32Array }}
-   */
-  const data = event.data;
+  const data = event.data as Data;
   const points = data.points;
   const pointBuffer = new Uint32Array(points.length * 32);
   const scalars = data.scalars;
@@ -15,10 +15,7 @@ onmessage = (event) => {
   if (points.length > 0 && typeof points[0].x === "bigint") {
     // const mask = 0xffffffff;
     for (let i = 0; i < points.length; i++) {
-      /**
-       * @type {BigIntPoint}
-       */
-      const p = points[i];
+      const p = points[i] as BigIntPoint;
       let idx = i * 32;
       for (let c of [p.x, p.y, p.t, p.z]) {
         for (let j = 7; j >= 0; j--) {
@@ -30,10 +27,7 @@ onmessage = (event) => {
     }
   } else {
     for (let i = 0; i < points.length; i++) {
-      /**
-       * @type {U32ArrayPoint}
-       */
-      const p = points[i];
+      const p = points[i] as U32ArrayPoint;
       pointBuffer.set(p.x, i * 32);
       pointBuffer.set(p.y, i * 32 + 8);
       pointBuffer.set(p.t, i * 32 + 16);
@@ -44,10 +38,7 @@ onmessage = (event) => {
   if (scalars.length > 0 && typeof scalars[0] === "bigint") {
     const mask = 0xffffffffn;
     for (let i = 0; i < scalars.length; i++) {
-      /**
-       * @type {BigInt}
-       */
-      let s = scalars[i];
+      let s = scalars[i] as bigint;
       for (let j = 7; j >= 0; j--) {
         scalarBuffer[i * 8 + j] = Number(s & mask);
         s >>= 32n;
@@ -55,9 +46,10 @@ onmessage = (event) => {
     }
   } else {
     for (let i = 0; i < scalars.length; i++)
-      scalarBuffer.set(scalars[i], i * 8);
+      scalarBuffer.set(scalars[i] as Uint32Array, i * 8);
   }
 
+  // @ts-expect-error - TS doesn't know we are in a worker so uses the wrong type
   postMessage({ pointBuffer, scalarBuffer }, [
     pointBuffer.buffer,
     scalarBuffer.buffer,

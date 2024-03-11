@@ -9,12 +9,12 @@ mod utils;
 use std::convert::TryInto;
 
 use ark_ec::{CurveGroup, Group};
-use ark_ed_on_bls12_377::EdwardsProjective;
+use ark_ed_on_bls12_377::{EdwardsAffine, EdwardsProjective};
 use ark_ff::Zero;
 use paste::paste;
 use rayon::iter::ParallelIterator;
 
-use crate::bytes::{read_points, write_fq};
+use crate::bytes::{read_fq, read_points, write_fq};
 #[allow(unused_imports)]
 use crate::split::*;
 use wasm_bindgen::prelude::*;
@@ -200,6 +200,19 @@ macro_rules! define_msm_functions {
 }
 
 define_msm_functions!(8, 9, 10, 11, 12, 13, 14, 15, 16, 20);
+
+#[wasm_bindgen]
+pub fn point_add_affine(a: &[u32], b: &[u32]) -> Vec<u32> {
+    assert_eq!(a.len(), 16);
+    assert_eq!(b.len(), 16);
+    let a = EdwardsAffine::new_unchecked(read_fq(&a[0..8]), read_fq(&a[8..16]));
+    let b = EdwardsAffine::new_unchecked(read_fq(&b[0..8]), read_fq(&b[8..16]));
+    let c = (a + b).into_affine();
+    let mut result_buf = vec![0u32; 16];
+    write_fq(&mut result_buf[0..8], &c.x);
+    write_fq(&mut result_buf[8..16], &c.y);
+    result_buf
+}
 
 // WASM bindings
 

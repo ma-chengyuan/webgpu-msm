@@ -84,6 +84,8 @@ const workerConfig = {
   target: "webworker",
   entry: {
     wasmMSM: "./src/workers/wasmMSM.ts",
+    gpu_worker: "./src/submission/gpu_worker.ts",
+    convert_worker: "./src/submission/convert_worker.ts",
   },
   output: {
     pathinfo: false,
@@ -122,6 +124,10 @@ const workerConfig = {
         test: /\.m?js$/i,
         exclude: /node_modules/,
         type: "javascript/auto",
+      },
+      {
+        test: /\.wgsl/,
+        type: "asset/source",
       },
       {
         test: /\.(ts|js)x?$/i,
