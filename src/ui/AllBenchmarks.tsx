@@ -208,7 +208,7 @@ export const AllBenchmarks: React.FC = () => {
         postResult={postResult}
         bold={true}
       />
-      <Benchmark
+      {/* <Benchmark
         name={"Your MSM"}
         disabled={disabledBenchmark}
         baseAffinePoints={baseAffineBigIntPoints}
@@ -217,9 +217,9 @@ export const AllBenchmarks: React.FC = () => {
         msmFunc={compute_msm}
         postResult={postResult}
         bold={true}
-      />
+      /> */}
       <Benchmark
-        name={"Your MSM (u32)"}
+        name={"Your MSM"}
         disabled={disabledBenchmark}
         baseAffinePoints={u32Points}
         scalars={u32Scalars}

@@ -15,13 +15,19 @@ import init, {
 let initialized = false;
 let gpuWorker: Worker | undefined = undefined;
 
+function getBestWindowSize(n: number): number {
+  const logN = Math.log2(n);
+  return logN == 20 ? 13 : 12;
+}
+
 export const compute_msm = async (
   baseAffinePoints: BigIntPoint[] | U32ArrayPoint[],
   scalars: bigint[] | Uint32Array[]
 ): Promise<{ x: bigint; y: bigint }> => {
-  const windowSize = parseInt(
-    new URLSearchParams(location.search).get("windowSize") || "13"
-  );
+  const windowSizeStr = new URLSearchParams(location.search).get("windowSize");
+  const windowSize = windowSizeStr
+    ? parseInt(windowSizeStr)
+    : getBestWindowSize(baseAffinePoints.length);
   setWindowSize(windowSize);
 
   const sabPoints = new SharedArrayBuffer(

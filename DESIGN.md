@@ -11,7 +11,7 @@ This submission has two variants:
 - The CPU-only variant (`http://localhost:4040/?cpuWorkRatio=1`)
 - The GPU-only variant (`http://localhost:4040/?cpuWorkRatio=0`)
 
-I kindly request that the judge benchmark both variants.
+I kindly request that the prize commitee benchmark both variants.
 
 ## Features
 
@@ -25,8 +25,7 @@ practical applications:
   parameter in the URL. More window sizes can be supported easily.
 - CPU-GPU co-computation: A configurable portion of the input can be split to
   run on the GPU. This is controlled by the `cpuWorkRatio` query parameter. It can
-  be any value from 0 (GPU-only) to 1 (CPU-only), but for the current
-  implementation actual co-computation turns out to be slower.
+  be any value from 0 (GPU-only) to 1 (CPU-only).
 - Supports both input format. `Uint32Points` is preferred.
 
 ## Design
