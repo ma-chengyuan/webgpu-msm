@@ -7,6 +7,7 @@ import init, {
   split_dynamic,
   inter_bucket_reduce_dynamic,
   msm_end_to_end_dynamic,
+  msm_end_to_end_dynamic_with_idle,
   point_add_affine,
   initThreadPool,
 } from "./msm-wasm/pkg/msm_wasm.js";
@@ -22,7 +23,9 @@ export const compute_msm = async (
   baseAffinePoints: BigIntPoint[] | U32ArrayPoint[],
   scalars: bigint[] | Uint32Array[]
 ): Promise<{ x: bigint; y: bigint }> => {
-  setWindowSize(13);
+  setWindowSize(
+    parseInt(new URLSearchParams(location.search).get("windowSize") || "13")
+  );
 
   const sabPoints = new SharedArrayBuffer(
     baseAffinePoints.length * nBytesPerPoint
@@ -113,9 +116,9 @@ export const compute_msm = async (
     console.timeEnd("inter bucket reduction (rust)");
   } else if (cpuShare >= baseAffinePoints.length) {
     // CPU only
-    console.time("end to end rust msm (gpu)");
+    console.time("end to end rust msm (cpu)");
     result = msm_end_to_end_dynamic(windowSize, scalarBuffer, pointBuffer);
-    console.timeEnd("end to end rust msm (gpu)");
+    console.timeEnd("end to end rust msm (cpu)");
   } else {
     // GPU-CPU co-computation
     console.time("scalar split (rust)");
@@ -141,10 +144,11 @@ export const compute_msm = async (
       );
     });
     console.time("end to end rust msm (cpu)");
-    const resultCpu = msm_end_to_end_dynamic(
+    const resultCpu = msm_end_to_end_dynamic_with_idle(
       windowSize,
       scalarBuffer.subarray(0, cpuShare * nUint32PerScalar),
-      pointBuffer.subarray(0, cpuShare * nUint32PerPoint)
+      pointBuffer.subarray(0, cpuShare * nUint32PerPoint),
+      Math.floor(navigator.hardwareConcurrency / 2)
     );
     console.timeEnd("end to end rust msm (cpu)");
     const reduced = await reducedPromise;

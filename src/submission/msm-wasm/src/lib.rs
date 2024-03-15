@@ -139,6 +139,35 @@ where
     reduce_last::<Split>(read_points(raw_buckets))
 }
 
+/// Run a (internally parallel) computation with a given number of idle threads.
+/// This is helpful if we specifically want to reserve cores for other tasks.
+fn run_with_idle<F, R>(num_idle_threads: usize, thunk: F) -> R
+where
+    F: FnOnce() -> R + Send,
+    R: Send,
+{
+    if num_idle_threads == 0 {
+        return thunk();
+    }
+
+    use std::sync::mpsc;
+    let (tx_start, rx_start) = mpsc::channel();
+    let (tx_end, rx_end) = mpsc::channel();
+    let (_, ret) = rayon::join(
+        move || {
+            tx_start.send(()).unwrap();
+            rx_end.recv().unwrap();
+        },
+        move || {
+            rx_start.recv().unwrap();
+            let ret = run_with_idle(num_idle_threads - 1, thunk);
+            tx_end.send(()).unwrap();
+            ret
+        },
+    );
+    ret
+}
+
 macro_rules! define_msm_functions {
     ($($w:expr),*) => {
         $(paste! {
@@ -178,6 +207,13 @@ macro_rules! define_msm_functions {
                     $( $w => msm_end_to_end::<[<Split $w>]>(scalars_flat, points_flat), )*
                     _ => panic!("Unsupported window size: {}", window_size),
                 }
+            }
+
+            #[wasm_bindgen]
+            pub fn msm_end_to_end_dynamic_with_idle(window_size: u32, scalars_flat: &[u32], points_flat: &[u32], num_idle_threads: usize) -> Vec<u32> {
+                run_with_idle(num_idle_threads, ||
+                    msm_end_to_end_dynamic(window_size, scalars_flat, points_flat)
+                )
             }
 
             #[wasm_bindgen]
