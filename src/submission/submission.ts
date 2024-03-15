@@ -1,7 +1,7 @@
 import type { BigIntPoint, U32ArrayPoint } from "../reference/types";
 
 import { nBytesPerPoint, nUint32PerPoint, nUint32PerScalar } from "./consts";
-import { windowSize, setWindowSize, gpuIntraBucketReduction } from "./gpu";
+import { setWindowSize, gpuIntraBucketReduction } from "./gpu";
 
 import init, {
   split_dynamic,
@@ -13,14 +13,16 @@ import init, {
 } from "./msm-wasm/pkg/msm_wasm.js";
 
 let initialized = false;
+let gpuWorker: Worker | undefined = undefined;
 
 export const compute_msm = async (
   baseAffinePoints: BigIntPoint[] | U32ArrayPoint[],
   scalars: bigint[] | Uint32Array[]
 ): Promise<{ x: bigint; y: bigint }> => {
-  setWindowSize(
-    parseInt(new URLSearchParams(location.search).get("windowSize") || "13")
+  const windowSize = parseInt(
+    new URLSearchParams(location.search).get("windowSize") || "13"
   );
+  setWindowSize(windowSize);
 
   const sabPoints = new SharedArrayBuffer(
     baseAffinePoints.length * nBytesPerPoint
@@ -113,7 +115,7 @@ export const compute_msm = async (
     console.timeEnd("scalar split (rust)");
     console.time("intra bucket reduction (gpu)");
     const reducedPromise = new Promise<Uint32Array>((resolve) => {
-      const gpuWorker = new Worker("./gpu_worker.js");
+      if (!gpuWorker) gpuWorker = new Worker("./gpu_worker.js");
       gpuWorker.onmessage = (e) => {
         console.timeEnd("intra bucket reduction (gpu)");
         resolve(e.data as Uint32Array);
@@ -121,6 +123,7 @@ export const compute_msm = async (
       // No need to transfer the pointBuffer, as it's already in the sab.
       gpuWorker.postMessage(
         {
+          windowSize,
           pointBuffer: pointBuffer.subarray(cpuShare * nUint32PerPoint),
           splitScalars,
         },
@@ -132,7 +135,7 @@ export const compute_msm = async (
       windowSize,
       scalarBuffer.subarray(0, cpuShare * nUint32PerScalar),
       pointBuffer.subarray(0, cpuShare * nUint32PerPoint),
-      Math.floor(navigator.hardwareConcurrency / 2)
+      0 // Math.floor(navigator.hardwareConcurrency / 2)
     );
     console.timeEnd("end to end rust msm (cpu)");
     const reduced = await reducedPromise;

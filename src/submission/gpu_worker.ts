@@ -1,12 +1,14 @@
-import { gpuIntraBucketReduction } from "./gpu";
+import { gpuIntraBucketReduction, setWindowSize } from "./gpu";
 
 type Data = {
+  windowSize: number;
   pointBuffer: Uint32Array;
   splitScalars: Uint32Array;
 };
 
 onmessage = async (event) => {
   const data = event.data as Data;
+  setWindowSize(data.windowSize);
   const result = await gpuIntraBucketReduction(
     data.pointBuffer,
     data.splitScalars
