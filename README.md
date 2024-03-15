@@ -1,5 +1,11 @@
 # webgpu-msm
 
+**For design doc and build instructions, see DESIGN.md**
+
+**For design doc and build instructions, see DESIGN.md**
+
+**For design doc and build instructions, see DESIGN.md**
+
 - [Quick Start](#quick-start)
 - [Prize Desription](#prize-description)
 - [Judging](#judging)
