@@ -17,7 +17,9 @@ let gpuWorker: Worker | undefined = undefined;
 
 function getBestWindowSize(n: number): number {
   const logN = Math.log2(n);
-  return logN == 20 ? 13 : 12;
+  if (logN >= 20) return 13;
+  if (logN <= 16) return 11;
+  return 12;
 }
 
 export const compute_msm = async (

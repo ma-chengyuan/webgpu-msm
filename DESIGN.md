@@ -6,12 +6,15 @@ This submission is done as part of my UROP at MIT's Computation Structures Group
 
 ## Variants
 
-This submission has two variants:
+This submission has three variants:
 
-- The CPU-only variant (`http://localhost:4040/?cpuWorkRatio=1`)
 - The GPU-only variant (`http://localhost:4040/?cpuWorkRatio=0`)
+- The co-computation variant (20% CPU + 80% GPU) (`http://localhost:4040/?cpuWorkRatio=0.2`)
+- The CPU-only variant (`http://localhost:4040/?cpuWorkRatio=1`)
 
-I kindly request that the prize commitee benchmark both variants.
+I kindly request that the prize commitee benchmark all three variants, if
+possible. If not possible, the co-computation variant takes priority over the
+GPU-only variant, which takes priority over the CPU-only variant.
 
 ## Features
 
