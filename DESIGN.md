@@ -153,3 +153,9 @@ versions may work but is not tested.
 After building the WASM part, the rest of the submission can be built
 with `npx webpack --config webpack.prod.config.cjs`, or served
 with `yarn start`, as usual.
+
+If you have any trouble building,
+
+- Try unzipping `pkg.zip` under `src/submission/msm-wasm` to
+  `src/submission/msm-wasm/pkg`. `pkg.zip` contains the pre-built WASM binary.
+- Try https://danglingpointer.fun:4041/ which deploys a full prod build of this submission. Add query parameters (e.g., `?cpuWorkRatio=0`) as usual.
