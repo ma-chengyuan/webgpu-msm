@@ -9,8 +9,11 @@ This submission is done as part of my UROP at MIT's Computation Structures Group
 This submission has three variants:
 
 - The GPU-only variant (`http://localhost:4040/?cpuWorkRatio=0`)
+  - For machines with very powerful GPU and relatively weak CPU
 - The co-computation variant (20% CPU + 80% GPU) (`http://localhost:4040/?cpuWorkRatio=0.2`)
+  - For machines with relatively balanced GPU and CPU power
 - The CPU-only variant (`http://localhost:4040/?cpuWorkRatio=1`)
+  - For machines with weak or no GPU (such as Intel's integrated GPU)
 
 I kindly request that the prize commitee benchmark all three variants, if
 possible. If not possible, the co-computation variant takes priority over the
